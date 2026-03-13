@@ -5,8 +5,8 @@
 // @description  Pokazuje timery elit II i tytanow z pelna integracja Lootlog
 // @author       Kruul
 // @match        https://*.margonem.pl/
-// @updateURL    https://raw.githubusercontent.com/kruulxd/iledoe2/main/za-ile-respi-addon.js
-// @downloadURL  https://raw.githubusercontent.com/kruulxd/iledoe2/main/za-ile-respi-addon.js
+// @updateURL    https://raw.githubusercontent.com/kruulxd/iledoe2/main/za-ile-respi-addon.user.js
+// @downloadURL  https://raw.githubusercontent.com/kruulxd/iledoe2/main/za-ile-respi-addon.user.js
 // @supportURL   https://github.com/kruulxd/iledoe2/issues
 // @grant        none
 // ==/UserScript==
@@ -565,4 +565,3 @@
     waitForEngine(init);
 
 })();
-
