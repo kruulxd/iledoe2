@@ -299,8 +299,7 @@
             
             let timerColor = '#00ff88';
             let labelText = 'respi za';
-            let statusText = '';
-            let statusColor = '';
+            let nameColor = isTitan ? '#ff3333' : '#ff6b9d';
             
             if (isTitan) {
                 if (minSeconds > 0) {
@@ -314,7 +313,7 @@
             
             toast.innerHTML = `
                 <div style="display: flex; align-items: center; gap: 8px;">
-                    <span style="color: #ff6b9d; font-weight: bold;">${eliteName}</span>
+                    <span style="color: ${nameColor}; font-weight: bold;">${eliteName}</span>
                     <span style="color: #aaa;">-</span>
                     <span style="color: #fff;">${labelText}</span>
                     <span id="${timerElementId}" style="color: ${timerColor}; font-weight: bold;">${formatTime(totalSeconds)}</span>
@@ -322,10 +321,11 @@
             `;
         } else {
             let noTimerMessage, messageColor;
+            let nameColor = npcType === 'TITAN' ? '#ff3333' : '#ff6b9d';
             
             if (npcType === 'TITAN') {
                 const hasAccess = hasTitanAccess;
-                noTimerMessage = hasAccess ? `${eliteName} wybity` : 'Brak dostępu do timera';
+                noTimerMessage = hasAccess ? `${eliteName} wybity` : 'Brak dost\u0119pu do timera';
                 messageColor = hasAccess ? '#ffaa00' : '#999';
             } else {
                 noTimerMessage = 'nie ma na timerze';
@@ -334,7 +334,7 @@
             
             toast.innerHTML = `
                 <div style="display: flex; align-items: center; gap: 8px;">
-                    <span style="color: #ff6b9d; font-weight: bold;">${eliteName}</span>
+                    <span style="color: ${nameColor}; font-weight: bold;">${eliteName}</span>
                     <span style="color: #aaa;">-</span>
                     <span style="color: ${messageColor};">${noTimerMessage}</span>
                 </div>
@@ -399,9 +399,10 @@
                     }
                 } else if (remainingSeconds <= 0) {
                     clearInterval(interval);
+                    const nameColor = isTitan ? '#ff3333' : '#ff6b9d';
                     toast.innerHTML = `
                         <div style="display: flex; align-items: center; gap: 8px;">
-                            <span style="color: #ff6b9d; font-weight: bold;">${eliteName}</span>
+                            <span style="color: ${nameColor}; font-weight: bold;">${eliteName}</span>
                             <span style="color: #aaa;">-</span>
                             <span style="color: #00ff88; font-weight: bold;">zrespił/a</span>
                         </div>
