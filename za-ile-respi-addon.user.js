@@ -297,16 +297,18 @@
             const totalSeconds = lootlogTimer.remainingSeconds;
             const minSeconds = lootlogTimer.minRemainingSeconds || 0;
             
+            let timerColor = '#00ff88';
+            let labelText = 'respi za';
             let statusText = '';
             let statusColor = '';
             
             if (isTitan) {
                 if (minSeconds > 0) {
-                    statusText = ' (nie respi)';
-                    statusColor = '#fff';
+                    timerColor = '#fff';
+                    labelText = 'respi za';
                 } else {
-                    statusText = ' (respi)';
-                    statusColor = '#ffa500';
+                    timerColor = '#ffa500';
+                    labelText = 'respi jeszcze przez';
                 }
             }
             
@@ -314,9 +316,8 @@
                 <div style="display: flex; align-items: center; gap: 8px;">
                     <span style="color: #ff6b9d; font-weight: bold;">${eliteName}</span>
                     <span style="color: #aaa;">-</span>
-                    <span style="color: #fff;">respi za</span>
-                    <span id="${timerElementId}" style="color: #00ff88; font-weight: bold;">${formatTime(totalSeconds)}</span>
-                    ${isTitan ? `<span style="color: ${statusColor}; font-size: 11px;">${statusText}</span>` : ''}
+                    <span style="color: #fff;">${labelText}</span>
+                    <span id="${timerElementId}" style="color: ${timerColor}; font-weight: bold;">${formatTime(totalSeconds)}</span>
                 </div>
             `;
         } else {
@@ -383,14 +384,16 @@
                     timerElement.textContent = formatTime(remainingSeconds);
                     
                     if (isTitan) {
-                        const statusSpan = toast.querySelector('span[style*="font-size: 11px"]');
-                        if (statusSpan) {
-                            if (minRemainingSeconds > 0) {
-                                statusSpan.textContent = ' (nie respi)';
-                                statusSpan.style.color = '#fff';
-                            } else {
-                                statusSpan.textContent = ' (respi)';
-                                statusSpan.style.color = '#ffa500';
+                        const labelSpan = toast.querySelector('span[style*="color: #fff"]');
+                        if (minRemainingSeconds > 0) {
+                            timerElement.style.color = '#fff';
+                            if (labelSpan && labelSpan.textContent !== 'respi za') {
+                                labelSpan.textContent = 'respi za';
+                            }
+                        } else {
+                            timerElement.style.color = '#ffa500';
+                            if (labelSpan && labelSpan.textContent !== 'respi jeszcze przez') {
+                                labelSpan.textContent = 'respi jeszcze przez';
                             }
                         }
                     }
