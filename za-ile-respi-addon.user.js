@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Za ile respi Elita II & Tytan
 // @namespace    http://tampermonkey.net/
-// @version      1.2
+// @version      1.3
 // @description  Pokazuje timery elit II i tytanow z pelna integracja Lootlog
 // @author       Kruul
 // @match        https://*.margonem.pl/
@@ -485,7 +485,6 @@
                 }
             }, 1000);
 
-            // Usunięcie toastu po kliknięciu
             toast.addEventListener('click', () => {
                 clearInterval(interval);
                 toast.style.animation = 'fadeOut 0.2s ease-out';
@@ -517,10 +516,8 @@
     function showMatherWarning() {
         const warningId = 'mather-warning';
         
-        // Pobierz nick aktualnego gracza
-        const currentPlayerNick = window.Engine?.hero?.d?.nick || '';
+        const currentPlayerNick = (window.Engine?.hero?.d?.nick || '').replace(/\s*\(\d+p\)$/, '');
         
-        // Lista nicków Mathera na Arkantes - nie pokazuj im ostrzeżenia
         const matherNicks = [
             'Captain Plum',
             'Eldakhion',
@@ -530,21 +527,18 @@
             'Vargoth'
         ];
         
-        // Nie pokazuj Matherowi jego własnego ostrzeżenia
         if (matherNicks.some(nick => nick.toLowerCase() === currentPlayerNick.toLowerCase())) {
             matherWarningShown = true;
             return;
         }
         
-        // Nie pokazuj jeśli już było pokazane
         if (matherWarningShown) {
             return;
         }
         
-        // Usuń poprzednie ostrzeżenie jeśli istnieje
         const existing = document.getElementById(warningId);
         if (existing) {
-            return; // Nie pokazuj ponownie jeśli już jest
+            return;
         }
         
         matherWarningShown = true;
@@ -617,7 +611,6 @@
         
         document.body.appendChild(warning);
         
-        // Usuń po kliknięciu
         warning.addEventListener('click', () => {
             warning.style.animation = 'fadeOut 0.3s ease-out';
             setTimeout(() => warning.remove(), 300);
@@ -625,7 +618,6 @@
         
         warning.title = 'Kliknij aby zamknąć';
         
-        // Auto-usuń po 5 sekundach
         setTimeout(() => {
             if (warning.parentNode) {
                 warning.style.animation = 'fadeOut 0.5s ease-out';
@@ -650,7 +642,7 @@
         if (newMapName && (newMapName !== currentMapName || forceRefresh)) {
             if (newMapName !== currentMapName) {
                 currentMapName = newMapName;
-                matherWarningShown = false; // Reset ostrzeżenia przy zmianie mapy
+                matherWarningShown = false;
             }
             
             const eliteData = ELITE_II_DATA[currentMapName];
@@ -675,7 +667,6 @@
                         }
                     }
                     
-                    // Sprawdź czy timer dodał Ilmather (tylko dla Elit II, nie Tytanów)
                     if (lootlogTimer && lootlogTimer.addedByName && npcType === 'ELITE2') {
                         if (lootlogTimer.addedByName.toLowerCase().includes('ilmather')) {
                             matherDetected = true;
@@ -685,7 +676,6 @@
                     showToast(npcName, lootlogTimer, index, npcType);
                 });
                 
-                // Pokaż ostrzeżenie jeśli Mather dodał timer
                 if (matherDetected) {
                     showMatherWarning();
                 }
@@ -777,14 +767,12 @@
         setupNpcKillListener();
         createPositionSettings();
         
-        // Aktualizuj pozycje przy zmianie rozmiaru okna
         window.addEventListener('resize', () => {
             const mapName = getCurrentMapName();
             if (mapName && (ELITE_II_DATA[mapName] || TITAN_DATA[mapName])) {
                 checkMapChange(true);
             }
             
-            // Aktualizuj pozycję ostrzeżenia Mathera jeśli jest widoczne
             const matherWarning = document.getElementById('mather-warning');
             if (matherWarning) {
                 const bounds = getGameCanvasBounds();
@@ -841,7 +829,6 @@
         
         document.body.appendChild(settingsButton);
         
-        // Aktualizuj pozycję przycisku przy zmianie rozmiaru
         window.addEventListener('resize', updateButtonPosition);
     }
 
@@ -954,7 +941,6 @@
             panel.remove();
         });
 
-        // Zamknięcie po kliknięciu poza panelem
         setTimeout(() => {
             document.addEventListener('click', function closePanel(e) {
                 if (!panel.contains(e.target) && e.target.id !== 'elite-position-settings-btn') {
