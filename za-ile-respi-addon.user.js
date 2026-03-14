@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Za ile respi Elita II & Tytan
 // @namespace    http://tampermonkey.net/
-// @version      1.1
+// @version      1.2
 // @description  Pokazuje timery elit II i tytanow z pelna integracja Lootlog
 // @author       Kruul
 // @match        https://*.margonem.pl/
@@ -131,6 +131,8 @@
     let currentWorld = 'arkantes';
     let hasEliteAccess = false;
     let hasTitanAccess = false;
+    let toastPosition = localStorage.getItem('eliteToastPosition') || 'bottom-center';
+    let matherWarningShown = false;
 
     function getWorld() {
         try {
@@ -192,7 +194,8 @@
                                     minRemainingSeconds: minRemainingSeconds,
                                     minSpawnTime: timer.minSpawnTime,
                                     maxSpawnTime: timer.maxSpawnTime,
-                                    location: timer.npc.location
+                                    location: timer.npc.location,
+                                    addedByName: timer.member?.name || null
                                 };
                             }
                         });
@@ -255,11 +258,82 @@
         }
     }
 
+    function getGameCanvasBounds() {
+        const canvas = document.getElementById('GAME_CANVAS');
+        if (canvas) {
+            const rect = canvas.getBoundingClientRect();
+            return {
+                top: rect.top,
+                left: rect.left,
+                width: rect.width,
+                height: rect.height
+            };
+        }
+        return { top: 0, left: 0, width: window.innerWidth, height: window.innerHeight };
+    }
+
+    function getPositionStyle(index = 0) {
+        const spacing = 35;
+        const offset = 10;
+        const bounds = getGameCanvasBounds();
+        
+        const positions = {
+            'top-left': {
+                top: `${bounds.top + offset + (index * spacing)}px`,
+                left: `${bounds.left + offset}px`,
+                transform: 'none'
+            },
+            'top-center': {
+                top: `${bounds.top + offset + (index * spacing)}px`,
+                left: `${bounds.left + bounds.width / 2}px`,
+                transform: 'translateX(-50%)'
+            },
+            'top-right': {
+                top: `${bounds.top + offset + (index * spacing)}px`,
+                left: `${bounds.left + bounds.width - offset}px`,
+                transform: 'translateX(-100%)'
+            },
+            'middle-left': {
+                top: `${bounds.top + bounds.height / 2 + (index * spacing)}px`,
+                left: `${bounds.left + offset}px`,
+                transform: 'translateY(-50%)'
+            },
+            'middle-center': {
+                top: `${bounds.top + bounds.height / 2 + (index * spacing)}px`,
+                left: `${bounds.left + bounds.width / 2}px`,
+                transform: 'translate(-50%, -50%)'
+            },
+            'middle-right': {
+                top: `${bounds.top + bounds.height / 2 + (index * spacing)}px`,
+                left: `${bounds.left + bounds.width - offset}px`,
+                transform: 'translate(-100%, -50%)'
+            },
+            'bottom-left': {
+                top: `${bounds.top + bounds.height - offset - (index * spacing) - 30}px`,
+                left: `${bounds.left + offset}px`,
+                transform: 'none'
+            },
+            'bottom-center': {
+                top: `${bounds.top + bounds.height - offset - (index * spacing) - 30}px`,
+                left: `${bounds.left + bounds.width / 2}px`,
+                transform: 'translateX(-50%)'
+            },
+            'bottom-right': {
+                top: `${bounds.top + bounds.height - offset - (index * spacing) - 30}px`,
+                left: `${bounds.left + bounds.width - offset}px`,
+                transform: 'translateX(-100%)'
+            }
+        };
+        return positions[toastPosition] || positions['bottom-center'];
+    }
+
     function showToast(eliteName, lootlogTimer = null, index = 0, npcType = 'ELITE2') {
         const safeEliteName = eliteName.replace(/[^a-zA-Z0-9]/g, '-');
         const toastId = `elite-toast-${safeEliteName}`;
         
         const existingToast = document.getElementById(toastId);
+        const isNewToast = !existingToast;
+        
         if (existingToast) {
             existingToast.remove();
         }
@@ -271,13 +345,13 @@
         const hasLootlogTimer = lootlogTimer && lootlogTimer.remainingSeconds !== undefined;
         const isTitan = lootlogTimer && lootlogTimer.type === 'TITAN';
         
-        const bottomPosition = 60 + (index * 35);
+        const posStyle = getPositionStyle(index);
         
         toast.style.cssText = `
             position: fixed;
-            bottom: ${bottomPosition}px;
-            left: 50%;
-            transform: translateX(-50%);
+            top: ${posStyle.top};
+            left: ${posStyle.left};
+            transform: ${posStyle.transform};
             background: rgba(20, 20, 20, 0.75);
             color: #fff;
             padding: 8px 15px;
@@ -287,8 +361,9 @@
             font-weight: normal;
             box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
             z-index: 99999;
-            animation: slideUp 0.3s ease-out;
+            ${isNewToast ? 'animation: slideIn 0.3s ease-out;' : ''}
             backdrop-filter: blur(5px);
+            pointer-events: auto;
         `;
         
         const timerElementId = `timer-${safeEliteName}`;
@@ -343,14 +418,14 @@
 
         const style = document.createElement('style');
         style.textContent = `
-            @keyframes slideUp {
+            @keyframes slideIn {
                 from {
                     opacity: 0;
-                    transform: translateX(-50%) translateY(20px);
+                    transform: scale(0.9);
                 }
                 to {
                     opacity: 1;
-                    transform: translateX(-50%) translateY(0);
+                    transform: scale(1);
                 }
             }
             @keyframes fadeOut {
@@ -439,6 +514,107 @@
         return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
     }
 
+    function showMatherWarning() {
+        const warningId = 'mather-warning';
+        
+        // Nie pokazuj jeśli już było pokazane
+        if (matherWarningShown) {
+            return;
+        }
+        
+        // Usuń poprzednie ostrzeżenie jeśli istnieje
+        const existing = document.getElementById(warningId);
+        if (existing) {
+            return; // Nie pokazuj ponownie jeśli już jest
+        }
+        
+        matherWarningShown = true;
+
+        const bounds = getGameCanvasBounds();
+        const warning = document.createElement('div');
+        warning.id = warningId;
+        
+        warning.style.cssText = `
+            position: fixed;
+            top: ${bounds.top + bounds.height / 2}px;
+            left: ${bounds.left + bounds.width / 2}px;
+            transform: translate(-50%, -50%);
+            background: linear-gradient(135deg, rgba(139, 0, 0, 0.95), rgba(255, 69, 0, 0.95));
+            color: #fff;
+            padding: 20px 30px;
+            border-radius: 12px;
+            font-family: Arial, sans-serif;
+            font-size: 24px;
+            font-weight: bold;
+            box-shadow: 0 0 30px rgba(255, 0, 0, 0.8), 0 0 60px rgba(255, 69, 0, 0.4);
+            z-index: 100001;
+            animation: warningPulse 1s ease-in-out infinite, warningFadeIn 0.5s ease-out;
+            border: 3px solid rgba(255, 215, 0, 0.8);
+            text-shadow: 0 0 10px rgba(255, 0, 0, 0.8), 2px 2px 4px rgba(0, 0, 0, 0.9);
+            backdrop-filter: blur(5px);
+            pointer-events: auto;
+            cursor: pointer;
+        `;
+        
+        warning.innerHTML = `
+            <div style="display: flex; align-items: center; gap: 15px; justify-content: center;">
+                <span style="font-size: 32px; animation: warningShake 0.5s ease-in-out infinite;">⚠️</span>
+                <span style="letter-spacing: 2px;">UWAGA MATHER GRASUJE!</span>
+                <span style="font-size: 32px; animation: warningShake 0.5s ease-in-out infinite;">⚠️</span>
+            </div>
+        `;
+        
+        // Dodaj style dla animacji
+        const style = document.createElement('style');
+        style.textContent = `
+            @keyframes warningPulse {
+                0%, 100% {
+                    box-shadow: 0 0 30px rgba(255, 0, 0, 0.8), 0 0 60px rgba(255, 69, 0, 0.4);
+                }
+                50% {
+                    box-shadow: 0 0 50px rgba(255, 0, 0, 1), 0 0 100px rgba(255, 69, 0, 0.6);
+                }
+            }
+            @keyframes warningFadeIn {
+                from {
+                    opacity: 0;
+                    transform: translate(-50%, -50%) scale(0.5);
+                }
+                to {
+                    opacity: 1;
+                    transform: translate(-50%, -50%) scale(1);
+                }
+            }
+            @keyframes warningShake {
+                0%, 100% { transform: rotate(0deg); }
+                25% { transform: rotate(-15deg); }
+                75% { transform: rotate(15deg); }
+            }
+        `;
+        if (!document.getElementById('mather-warning-style')) {
+            style.id = 'mather-warning-style';
+            document.head.appendChild(style);
+        }
+        
+        document.body.appendChild(warning);
+        
+        // Usuń po kliknięciu
+        warning.addEventListener('click', () => {
+            warning.style.animation = 'fadeOut 0.3s ease-out';
+            setTimeout(() => warning.remove(), 300);
+        });
+        
+        warning.title = 'Kliknij aby zamknąć';
+        
+        // Auto-usuń po 5 sekundach
+        setTimeout(() => {
+            if (warning.parentNode) {
+                warning.style.animation = 'fadeOut 0.5s ease-out';
+                setTimeout(() => warning.remove(), 500);
+            }
+        }, 3000);
+    }
+
     function removeAllToasts() {
         const toasts = document.querySelectorAll('.elite-toast');
         toasts.forEach(toast => {
@@ -455,6 +631,7 @@
         if (newMapName && (newMapName !== currentMapName || forceRefresh)) {
             if (newMapName !== currentMapName) {
                 currentMapName = newMapName;
+                matherWarningShown = false; // Reset ostrzeżenia przy zmianie mapy
             }
             
             const eliteData = ELITE_II_DATA[currentMapName];
@@ -464,6 +641,8 @@
             
             if (npcData) {
                 const npcNames = npcData.split('/').map(n => n.trim());
+                let matherDetected = false;
+                
                 npcNames.forEach((npcName, index) => {
                     let lootlogTimer = null;
                     if (lootlogTimers[npcName]) {
@@ -476,8 +655,21 @@
                             }
                         }
                     }
+                    
+                    // Sprawdź czy timer dodał Ilmather (tylko dla Elit II, nie Tytanów)
+                    if (lootlogTimer && lootlogTimer.addedByName && npcType === 'ELITE2') {
+                        if (lootlogTimer.addedByName.toLowerCase().includes('ilmather')) {
+                            matherDetected = true;
+                        }
+                    }
+                    
                     showToast(npcName, lootlogTimer, index, npcType);
                 });
+                
+                // Pokaż ostrzeżenie jeśli Mather dodał timer
+                if (matherDetected) {
+                    showMatherWarning();
+                }
             } else {
                 removeAllToasts();
             }
@@ -564,6 +756,194 @@
         }
         
         setupNpcKillListener();
+        createPositionSettings();
+        
+        // Aktualizuj pozycje przy zmianie rozmiaru okna
+        window.addEventListener('resize', () => {
+            const mapName = getCurrentMapName();
+            if (mapName && (ELITE_II_DATA[mapName] || TITAN_DATA[mapName])) {
+                checkMapChange(true);
+            }
+            
+            // Aktualizuj pozycję ostrzeżenia Mathera jeśli jest widoczne
+            const matherWarning = document.getElementById('mather-warning');
+            if (matherWarning) {
+                const bounds = getGameCanvasBounds();
+                matherWarning.style.top = `${bounds.top + bounds.height / 2}px`;
+                matherWarning.style.left = `${bounds.left + bounds.width / 2}px`;
+            }
+        });
+    }
+
+    function createPositionSettings() {
+        const settingsButton = document.createElement('div');
+        settingsButton.id = 'elite-position-settings-btn';
+        settingsButton.innerHTML = '⚙️';
+        
+        function updateButtonPosition() {
+            const bounds = getGameCanvasBounds();
+            settingsButton.style.cssText = `
+                position: fixed;
+                top: ${bounds.top + bounds.height - 35}px;
+                left: ${bounds.left + bounds.width - 35}px;
+                width: 28px;
+                height: 28px;
+                background: rgba(20, 20, 20, 0.8);
+                color: #fff;
+                border-radius: 50%;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                cursor: pointer;
+                font-size: 14px;
+                z-index: 99998;
+                box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+                transition: all 0.2s;
+                backdrop-filter: blur(5px);
+            `;
+        }
+        
+        updateButtonPosition();
+        settingsButton.title = 'Ustawienia pozycji komunikatów E2/Tytan';
+        
+        settingsButton.addEventListener('mouseenter', () => {
+            settingsButton.style.transform = 'scale(1.1)';
+            settingsButton.style.background = 'rgba(40, 40, 40, 0.9)';
+        });
+        
+        settingsButton.addEventListener('mouseleave', () => {
+            settingsButton.style.transform = 'scale(1)';
+            settingsButton.style.background = 'rgba(20, 20, 20, 0.8)';
+        });
+        
+        settingsButton.addEventListener('click', () => {
+            showPositionPanel();
+        });
+        
+        document.body.appendChild(settingsButton);
+        
+        // Aktualizuj pozycję przycisku przy zmianie rozmiaru
+        window.addEventListener('resize', updateButtonPosition);
+    }
+
+    function showPositionPanel() {
+        const existingPanel = document.getElementById('elite-position-panel');
+        if (existingPanel) {
+            existingPanel.remove();
+            return;
+        }
+
+        const panel = document.createElement('div');
+        panel.id = 'elite-position-panel';
+        panel.style.cssText = `
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(20, 20, 20, 0.95);
+            color: #fff;
+            padding: 15px;
+            border-radius: 10px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+            z-index: 100000;
+            min-width: 240px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        `;
+
+        const positions = [
+            { value: 'top-left', label: '↖ Góra Lewo', icon: '↖' },
+            { value: 'top-center', label: '⬆ Góra Środek', icon: '⬆' },
+            { value: 'top-right', label: '↗ Góra Prawo', icon: '↗' },
+            { value: 'middle-left', label: '⬅ Środek Lewo', icon: '⬅' },
+            { value: 'middle-center', label: '⏺ Środek', icon: '⏺' },
+            { value: 'middle-right', label: '➡ Środek Prawo', icon: '➡' },
+            { value: 'bottom-left', label: '↙ Dół Lewo', icon: '↙' },
+            { value: 'bottom-center', label: '⬇ Dół Środek', icon: '⬇' },
+            { value: 'bottom-right', label: '↘ Dół Prawo', icon: '↘' }
+        ];
+
+        let html = `
+            <div style="text-align: center; margin-bottom: 10px;">
+                <h3 style="margin: 0 0 3px 0; color: #ff6b9d; font-size: 14px;">Pozycja komunikatów</h3>
+                <p style="margin: 0; font-size: 10px; color: #999;">Wybierz gdzie mają się wyświetlać timery</p>
+            </div>
+            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-bottom: 12px;">
+        `;
+
+        positions.forEach(pos => {
+            const isActive = toastPosition === pos.value;
+            html += `
+                <button 
+                    class="position-btn" 
+                    data-position="${pos.value}"
+                    style="
+                        padding: 8px 6px;
+                        background: ${isActive ? 'rgba(255, 107, 157, 0.3)' : 'rgba(50, 50, 50, 0.5)'};
+                        border: 2px solid ${isActive ? '#ff6b9d' : 'rgba(255, 255, 255, 0.1)'};
+                        color: #fff;
+                        border-radius: 6px;
+                        cursor: pointer;
+                        font-size: 18px;
+                        transition: all 0.2s;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                    "
+                    onmouseover="this.style.background='rgba(255, 107, 157, 0.2)'; this.style.borderColor='#ff6b9d';"
+                    onmouseout="this.style.background='${isActive ? 'rgba(255, 107, 157, 0.3)' : 'rgba(50, 50, 50, 0.5)'}'; this.style.borderColor='${isActive ? '#ff6b9d' : 'rgba(255, 255, 255, 0.1)'}';"
+                >${pos.icon}</button>
+            `;
+        });
+
+        html += `
+            </div>
+            <div style="text-align: center; font-size: 10px; color: #aaa; margin-bottom: 8px;">
+                Aktualna: <span style="color: #ff6b9d; font-weight: bold;">${positions.find(p => p.value === toastPosition).label}</span>
+            </div>
+            <button id="close-position-panel" style="
+                width: 100%;
+                padding: 8px;
+                background: rgba(100, 100, 100, 0.3);
+                border: 1px solid rgba(255, 255, 255, 0.2);
+                color: #fff;
+                border-radius: 6px;
+                cursor: pointer;
+                font-size: 11px;
+                transition: all 0.2s;
+            "
+            onmouseover="this.style.background='rgba(150, 150, 150, 0.3)';"
+            onmouseout="this.style.background='rgba(100, 100, 100, 0.3)';"
+            >Zamknij</button>
+        `;
+
+        panel.innerHTML = html;
+        document.body.appendChild(panel);
+
+        panel.querySelectorAll('.position-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const newPosition = btn.getAttribute('data-position');
+                toastPosition = newPosition;
+                localStorage.setItem('eliteToastPosition', newPosition);
+                panel.remove();
+                removeAllToasts();
+                setTimeout(() => checkMapChange(true), 100);
+            });
+        });
+
+        document.getElementById('close-position-panel').addEventListener('click', () => {
+            panel.remove();
+        });
+
+        // Zamknięcie po kliknięciu poza panelem
+        setTimeout(() => {
+            document.addEventListener('click', function closePanel(e) {
+                if (!panel.contains(e.target) && e.target.id !== 'elite-position-settings-btn') {
+                    panel.remove();
+                    document.removeEventListener('click', closePanel);
+                }
+            });
+        }, 100);
     }
 
     waitForEngine(init);
