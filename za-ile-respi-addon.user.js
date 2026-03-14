@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Za ile respi Elita II & Tytan
 // @namespace    http://tampermonkey.net/
-// @version      1.3
+// @version      1.4
 // @description  Pokazuje timery elit II i tytanow z pelna integracja Lootlog
 // @author       Kruul
 // @match        https://*.margonem.pl/
@@ -158,7 +158,7 @@
             hasEliteAccess = false;
             hasTitanAccess = false;
             currentWorld = getWorld();
-            
+
             const cacheStr = localStorage.getItem('ll:query-cache');
             if (cacheStr) {
                 const cache = JSON.parse(cacheStr);
@@ -166,27 +166,27 @@
                     const timersQuery = cache.clientState.queries.find(
                         q => q.queryKey && q.queryKey[0] === 'guild-timers' && q.queryKey[1] === currentWorld
                     );
-                    
+
                     if (timersQuery && timersQuery.state && timersQuery.state.data) {
                         const timers = timersQuery.state.data;
-                        
+
                         timers.forEach(timer => {
                             if (timer.npc && (timer.npc.type === 'ELITE2' || timer.npc.type === 'TITAN') && timer.npc.name) {
                                 const name = timer.npc.name;
-                                
+
                                 if (timer.npc.type === 'ELITE2') {
                                     hasEliteAccess = true;
                                 } else if (timer.npc.type === 'TITAN') {
                                     hasTitanAccess = true;
                                 }
-                                
+
                                 const now = Date.now();
                                 const minTime = new Date(timer.minSpawnTime).getTime();
                                 const maxTime = new Date(timer.maxSpawnTime).getTime();
-                                
+
                                 const remainingSeconds = Math.max(0, Math.floor((maxTime - now) / 1000));
                                 const minRemainingSeconds = Math.max(0, Math.floor((minTime - now) / 1000));
-                                
+
                                 lootlogTimers[name] = {
                                     name: name,
                                     type: timer.npc.type,
@@ -199,14 +199,14 @@
                                 };
                             }
                         });
-                        
+
                         if (Object.keys(lootlogTimers).length > 0) {
                             return;
                         }
                     }
                 }
             }
-            
+
             const lootlogTimerDiv = document.querySelector('.elite-timer-wnd, [class*="ll-timer"]');
             if (lootlogTimerDiv) {
                 const timerText = lootlogTimerDiv.textContent;
@@ -217,14 +217,14 @@
                     const time = match[2];
                     const [hours, minutes, seconds] = time.split(':').map(Number);
                     const totalSeconds = hours * 3600 + minutes * 60 + seconds;
-                    
+
                     lootlogTimers[name] = {
                         name: name,
                         remainingSeconds: totalSeconds,
                         timeString: time
                     };
                 }
-                
+
                 if (Object.keys(lootlogTimers).length > 0) {
                     return;
                 }
@@ -276,7 +276,7 @@
         const spacing = 35;
         const offset = 10;
         const bounds = getGameCanvasBounds();
-        
+
         const positions = {
             'top-left': {
                 top: `${bounds.top + offset + (index * spacing)}px`,
@@ -330,10 +330,10 @@
     function showToast(eliteName, lootlogTimer = null, index = 0, npcType = 'ELITE2') {
         const safeEliteName = eliteName.replace(/[^a-zA-Z0-9]/g, '-');
         const toastId = `elite-toast-${safeEliteName}`;
-        
+
         const existingToast = document.getElementById(toastId);
         const isNewToast = !existingToast;
-        
+
         if (existingToast) {
             existingToast.remove();
         }
@@ -341,12 +341,12 @@
         const toast = document.createElement('div');
         toast.id = toastId;
         toast.className = 'elite-toast';
-        
+
         const hasLootlogTimer = lootlogTimer && lootlogTimer.remainingSeconds !== undefined;
         const isTitan = lootlogTimer && lootlogTimer.type === 'TITAN';
-        
+
         const posStyle = getPositionStyle(index);
-        
+
         toast.style.cssText = `
             position: fixed;
             top: ${posStyle.top};
@@ -365,17 +365,17 @@
             backdrop-filter: blur(5px);
             pointer-events: auto;
         `;
-        
+
         const timerElementId = `timer-${safeEliteName}`;
-        
+
         if (hasLootlogTimer) {
             const totalSeconds = lootlogTimer.remainingSeconds;
             const minSeconds = lootlogTimer.minRemainingSeconds || 0;
-            
+
             let timerColor = '#00ff88';
             let labelText = 'respi za';
             let nameColor = isTitan ? '#ff3333' : '#ff6b9d';
-            
+
             if (isTitan) {
                 if (minSeconds > 0) {
                     timerColor = '#fff';
@@ -385,7 +385,7 @@
                     labelText = 'respi jeszcze przez';
                 }
             }
-            
+
             toast.innerHTML = `
                 <div style="display: flex; align-items: center; gap: 8px;">
                     <span style="color: ${nameColor}; font-weight: bold;">${eliteName}</span>
@@ -397,7 +397,7 @@
         } else {
             let noTimerMessage, messageColor;
             let nameColor = npcType === 'TITAN' ? '#ff3333' : '#ff6b9d';
-            
+
             if (npcType === 'TITAN') {
                 const hasAccess = hasTitanAccess;
                 noTimerMessage = hasAccess ? `${eliteName} wybity` : 'Brak dost\u0119pu do timera';
@@ -406,7 +406,7 @@
                 noTimerMessage = 'nie ma na timerze';
                 messageColor = '#999';
             }
-            
+
             toast.innerHTML = `
                 <div style="display: flex; align-items: center; gap: 8px;">
                     <span style="color: ${nameColor}; font-weight: bold;">${eliteName}</span>
@@ -450,14 +450,14 @@
             let remainingSeconds = totalSeconds;
             let minRemainingSeconds = minSeconds;
             const timerElement = document.getElementById(timerElementId);
-            
+
             const interval = setInterval(() => {
                 remainingSeconds--;
                 minRemainingSeconds--;
-                
+
                 if (remainingSeconds > 0 && timerElement) {
                     timerElement.textContent = formatTime(remainingSeconds);
-                    
+
                     if (isTitan) {
                         const labelSpan = toast.querySelector('span[style*="color: #fff"]');
                         if (minRemainingSeconds > 0) {
@@ -509,15 +509,20 @@
         const hours = Math.floor(seconds / 3600);
         const minutes = Math.floor((seconds % 3600) / 60);
         const secs = seconds % 60;
-        
+
         return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
     }
 
     function showMatherWarning() {
         const warningId = 'mather-warning';
-        
-        const currentPlayerNick = (window.Engine?.hero?.d?.nick || '').replace(/\s*\(\d+p\)$/, '');
-        
+
+        const heronameElement = document.querySelector('.heroname');
+        const rawNick = heronameElement ? heronameElement.textContent.trim() : '';
+        const currentPlayerNick = rawNick.replace(/\s*\(\d+p\)$/, '');
+
+        console.log('[MATHER DEBUG] Raw nick from .heroname:', rawNick);
+        console.log('[MATHER DEBUG] Cleaned nick:', currentPlayerNick);
+
         const matherNicks = [
             'Captain Plum',
             'Eldakhion',
@@ -526,27 +531,31 @@
             'Grzegorz Braun',
             'Vargoth'
         ];
-        
-        if (matherNicks.some(nick => nick.toLowerCase() === currentPlayerNick.toLowerCase())) {
+
+        const isExcluded = matherNicks.some(nick => nick.toLowerCase() === currentPlayerNick.toLowerCase());
+        console.log('[MATHER DEBUG] Is excluded:', isExcluded);
+
+        if (isExcluded) {
             matherWarningShown = true;
+            console.log('[MATHER DEBUG] Ostrzeżenie zablokowane - jesteś na liście wykluczonych');
             return;
         }
-        
+
         if (matherWarningShown) {
             return;
         }
-        
+
         const existing = document.getElementById(warningId);
         if (existing) {
             return;
         }
-        
+
         matherWarningShown = true;
 
         const bounds = getGameCanvasBounds();
         const warning = document.createElement('div');
         warning.id = warningId;
-        
+
         warning.style.cssText = `
             position: fixed;
             top: ${bounds.top + bounds.height / 2}px;
@@ -568,7 +577,7 @@
             pointer-events: auto;
             cursor: pointer;
         `;
-        
+
         warning.innerHTML = `
             <div style="display: flex; align-items: center; gap: 15px; justify-content: center;">
                 <span style="font-size: 32px; animation: warningShake 0.5s ease-in-out infinite;">⚠️</span>
@@ -576,7 +585,7 @@
                 <span style="font-size: 32px; animation: warningShake 0.5s ease-in-out infinite;">⚠️</span>
             </div>
         `;
-        
+
         // Dodaj style dla animacji
         const style = document.createElement('style');
         style.textContent = `
@@ -608,16 +617,16 @@
             style.id = 'mather-warning-style';
             document.head.appendChild(style);
         }
-        
+
         document.body.appendChild(warning);
-        
+
         warning.addEventListener('click', () => {
             warning.style.animation = 'fadeOut 0.3s ease-out';
             setTimeout(() => warning.remove(), 300);
         });
-        
+
         warning.title = 'Kliknij aby zamknąć';
-        
+
         setTimeout(() => {
             if (warning.parentNode) {
                 warning.style.animation = 'fadeOut 0.5s ease-out';
@@ -638,22 +647,22 @@
 
     function checkMapChange(forceRefresh = false) {
         const newMapName = getCurrentMapName();
-        
+
         if (newMapName && (newMapName !== currentMapName || forceRefresh)) {
             if (newMapName !== currentMapName) {
                 currentMapName = newMapName;
                 matherWarningShown = false;
             }
-            
+
             const eliteData = ELITE_II_DATA[currentMapName];
             const titanData = TITAN_DATA[currentMapName];
             const npcData = eliteData || titanData;
             const npcType = titanData ? 'TITAN' : 'ELITE2';
-            
+
             if (npcData) {
                 const npcNames = npcData.split('/').map(n => n.trim());
                 let matherDetected = false;
-                
+
                 npcNames.forEach((npcName, index) => {
                     let lootlogTimer = null;
                     if (lootlogTimers[npcName]) {
@@ -666,16 +675,16 @@
                             }
                         }
                     }
-                    
+
                     if (lootlogTimer && lootlogTimer.addedByName && npcType === 'ELITE2') {
                         if (lootlogTimer.addedByName.toLowerCase().includes('ilmather')) {
                             matherDetected = true;
                         }
                     }
-                    
+
                     showToast(npcName, lootlogTimer, index, npcType);
                 });
-                
+
                 if (matherDetected) {
                     showMatherWarning();
                 }
@@ -698,7 +707,7 @@
                     }, 1000);
                 }
             });
-            
+
             let lastCacheHash = '';
             setInterval(() => {
                 try {
@@ -719,7 +728,7 @@
                 } catch (e) {
                 }
             }, 10000);
-            
+
             if (window.Engine?.battle) {
                 const originalBattleEnd = window.Engine.battle.endBattle;
                 if (typeof originalBattleEnd === 'function') {
@@ -744,13 +753,13 @@
 
     function init() {
         fetchLootlogTimers();
-        
+
         setInterval(fetchLootlogTimers, 20000);
-        
+
         checkMapChange();
-        
+
         setInterval(checkMapChange, 2000);
-        
+
         try {
             if (window.Engine?.map) {
                 const originalMapChange = window.Engine.map.change;
@@ -763,16 +772,16 @@
             }
         } catch (e) {
         }
-        
+
         setupNpcKillListener();
         createPositionSettings();
-        
+
         window.addEventListener('resize', () => {
             const mapName = getCurrentMapName();
             if (mapName && (ELITE_II_DATA[mapName] || TITAN_DATA[mapName])) {
                 checkMapChange(true);
             }
-            
+
             const matherWarning = document.getElementById('mather-warning');
             if (matherWarning) {
                 const bounds = getGameCanvasBounds();
@@ -786,7 +795,7 @@
         const settingsButton = document.createElement('div');
         settingsButton.id = 'elite-position-settings-btn';
         settingsButton.innerHTML = '⚙️';
-        
+
         function updateButtonPosition() {
             const bounds = getGameCanvasBounds();
             settingsButton.style.cssText = `
@@ -809,26 +818,26 @@
                 backdrop-filter: blur(5px);
             `;
         }
-        
+
         updateButtonPosition();
         settingsButton.title = 'Ustawienia pozycji komunikatów E2/Tytan';
-        
+
         settingsButton.addEventListener('mouseenter', () => {
             settingsButton.style.transform = 'scale(1.1)';
             settingsButton.style.background = 'rgba(40, 40, 40, 0.9)';
         });
-        
+
         settingsButton.addEventListener('mouseleave', () => {
             settingsButton.style.transform = 'scale(1)';
             settingsButton.style.background = 'rgba(20, 20, 20, 0.8)';
         });
-        
+
         settingsButton.addEventListener('click', () => {
             showPositionPanel();
         });
-        
+
         document.body.appendChild(settingsButton);
-        
+
         window.addEventListener('resize', updateButtonPosition);
     }
 
@@ -880,8 +889,8 @@
         positions.forEach(pos => {
             const isActive = toastPosition === pos.value;
             html += `
-                <button 
-                    class="position-btn" 
+                <button
+                    class="position-btn"
                     data-position="${pos.value}"
                     style="
                         padding: 8px 6px;
