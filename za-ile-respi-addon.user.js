@@ -517,6 +517,25 @@
     function showMatherWarning() {
         const warningId = 'mather-warning';
         
+        // Pobierz nick aktualnego gracza
+        const currentPlayerNick = window.Engine?.hero?.d?.nick || '';
+        
+        // Lista nicków Mathera na Arkantes - nie pokazuj im ostrzeżenia
+        const matherNicks = [
+            'Captain Plum',
+            'Eldakhion',
+            'Eukalion',
+            'Girlan Led',
+            'Grzegorz Braun',
+            'Vargoth'
+        ];
+        
+        // Nie pokazuj Matherowi jego własnego ostrzeżenia
+        if (matherNicks.some(nick => nick.toLowerCase() === currentPlayerNick.toLowerCase())) {
+            matherWarningShown = true;
+            return;
+        }
+        
         // Nie pokazuj jeśli już było pokazane
         if (matherWarningShown) {
             return;
