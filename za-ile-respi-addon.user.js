@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Za ile respi Elita II & Tytan
 // @namespace    http://tampermonkey.net/
-// @version      1.5.2
+// @version      1.5.3
 // @description  Pokazuje timery elit II i tytanow z pelna integracja Lootlog
 // @author       Kruul
 // @match        https://*.margonem.pl/
@@ -153,63 +153,85 @@
         }
     }
 
+    function parseTimers(timers) {
+        timers.forEach(timer => {
+            if (timer.npc && (timer.npc.type === 'ELITE2' || timer.npc.type === 'TITAN') && timer.npc.name) {
+                const name = timer.npc.name;
+
+                if (timer.npc.type === 'ELITE2') {
+                    hasEliteAccess = true;
+                } else if (timer.npc.type === 'TITAN') {
+                    hasTitanAccess = true;
+                }
+
+                const now = Date.now();
+                const minTime = new Date(timer.minSpawnTime).getTime();
+                const maxTime = new Date(timer.maxSpawnTime).getTime();
+
+                const remainingSeconds = Math.max(0, Math.floor((maxTime - now) / 1000));
+                const minRemainingSeconds = Math.max(0, Math.floor((minTime - now) / 1000));
+
+                const timerData = {
+                    name: name,
+                    type: timer.npc.type,
+                    remainingSeconds: remainingSeconds,
+                    minRemainingSeconds: minRemainingSeconds,
+                    minSpawnTime: timer.minSpawnTime,
+                    maxSpawnTime: timer.maxSpawnTime,
+                    location: timer.npc.location,
+                    addedByName: timer.member?.name || null
+                };
+
+                // Indeksuj po nazwie NPC i lokacji (nazwie mapy) – oryginalna i lowercase
+                lootlogTimers[name] = timerData;
+                lootlogTimers[name.toLowerCase()] = timerData;
+                if (timer.npc.location) {
+                    lootlogTimers[timer.npc.location] = timerData;
+                    lootlogTimers[timer.npc.location.toLowerCase()] = timerData;
+                }
+            }
+        });
+    }
+
     function fetchLootlogTimers() {
         lootlogTimers = {};
         hasEliteAccess = false;
         hasTitanAccess = false;
         currentWorld = getWorld();
 
-        fetch(`https://api.lootlog.pl/timers?world=${encodeURIComponent(currentWorld)}`)
+        // Próba 1: odczyt z ll:query-cache (lokalny cache Lootloga, brak potrzeby autoryzacji)
+        try {
+            const cacheStr = localStorage.getItem('ll:query-cache');
+            if (cacheStr) {
+                const cache = JSON.parse(cacheStr);
+                if (cache.clientState && cache.clientState.queries) {
+                    const timersQuery = cache.clientState.queries.find(
+                        q => q.queryKey && q.queryKey[0] === 'guild-timers' && q.queryKey[1] === currentWorld
+                    );
+                    if (timersQuery && timersQuery.state && timersQuery.state.data) {
+                        parseTimers(timersQuery.state.data);
+                        checkMapChange(true);
+                        return;
+                    }
+                }
+            }
+        } catch (e) {}
+
+        // Próba 2: bezpośrednie API (wymaga zalogowanej sesji Lootlog w przeglądarce)
+        fetch(`https://api.lootlog.pl/timers?world=${encodeURIComponent(currentWorld)}`, {
+            credentials: 'include'
+        })
             .then(response => {
                 if (!response.ok) throw new Error('API error: ' + response.status);
                 return response.json();
             })
             .then(timers => {
                 if (!Array.isArray(timers)) return;
-
-                timers.forEach(timer => {
-                    if (timer.npc && (timer.npc.type === 'ELITE2' || timer.npc.type === 'TITAN') && timer.npc.name) {
-                        const name = timer.npc.name;
-
-                        if (timer.npc.type === 'ELITE2') {
-                            hasEliteAccess = true;
-                        } else if (timer.npc.type === 'TITAN') {
-                            hasTitanAccess = true;
-                        }
-
-                        const now = Date.now();
-                        const minTime = new Date(timer.minSpawnTime).getTime();
-                        const maxTime = new Date(timer.maxSpawnTime).getTime();
-
-                        const remainingSeconds = Math.max(0, Math.floor((maxTime - now) / 1000));
-                        const minRemainingSeconds = Math.max(0, Math.floor((minTime - now) / 1000));
-
-                        const timerData = {
-                            name: name,
-                            type: timer.npc.type,
-                            remainingSeconds: remainingSeconds,
-                            minRemainingSeconds: minRemainingSeconds,
-                            minSpawnTime: timer.minSpawnTime,
-                            maxSpawnTime: timer.maxSpawnTime,
-                            location: timer.npc.location,
-                            addedByName: timer.member?.name || null
-                        };
-
-                        // Indeksuj po nazwie NPC i po lokacji (nazwie mapy) – obie wersje lowercase
-                        lootlogTimers[name] = timerData;
-                        lootlogTimers[name.toLowerCase()] = timerData;
-                        if (timer.npc.location) {
-                            lootlogTimers[timer.npc.location] = timerData;
-                            lootlogTimers[timer.npc.location.toLowerCase()] = timerData;
-                        }
-                    }
-                });
-
-                // Po zaladowaniu timerów odswiez aktualny komunikat
+                parseTimers(timers);
                 checkMapChange(true);
             })
             .catch(e => {
-                // Cicha obsluga bledu - timery zostana puste
+                // Cicha obsługa błędu – timery zostaną puste
             });
     }
 
@@ -690,6 +712,19 @@
 
     function setupNpcKillListener() {
         try {
+            // Nasłuchuj zmian w cache Lootloga (gdy Lootlog odświeży timery)
+            window.addEventListener('storage', function(e) {
+                if (e.key === 'll:query-cache' || e.key === null) {
+                    fetchLootlogTimers();
+                    setTimeout(() => {
+                        const mapName = getCurrentMapName();
+                        if (mapName && (ELITE_II_DATA[mapName] || TITAN_DATA[mapName])) {
+                            checkMapChange(true);
+                        }
+                    }, 500);
+                }
+            });
+
             if (window.Engine?.battle) {
                 const originalBattleEnd = window.Engine.battle.endBattle;
                 if (typeof originalBattleEnd === 'function') {
