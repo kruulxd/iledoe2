@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Za ile respi Elita II & Tytan
 // @namespace    http://tampermonkey.net/
-// @version      1.5.4
+// @version      1.5.5
 // @description  Pokazuje timery elit II i tytanow z pelna integracja Lootlog
 // @author       Kruul
 // @match        https://*.margonem.pl/
@@ -423,6 +423,16 @@
         } else {
             setTimeout(doWork, 0);
         }
+    }
+
+    function debugLocalStorageKeys() {
+        console.group('[iledoe2] localStorage keys');
+        for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            const val = localStorage.getItem(key);
+            console.log(key, '→', val ? val.substring(0, 80) + (val.length > 80 ? '...' : '') : '(empty)');
+        }
+        console.groupEnd();
     }
 
     function waitForEngine(callback) {
@@ -948,6 +958,7 @@
     }
 
     function init() {
+        debugLocalStorageKeys();
         fetchLootlogTimers(() => checkMapChange(true));
 
         setInterval(() => fetchLootlogTimers(() => {
