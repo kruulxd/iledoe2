@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Za ile respi Elita II & Tytan
 // @namespace    http://tampermonkey.net/
-// @version      1.5
+// @version      1.4.1
 // @description  Pokazuje timery elit II i tytanow z pelna integracja Lootlog
 // @author       Kruul
 // @match        https://*.margonem.pl/
@@ -184,7 +184,7 @@
                         const remainingSeconds = Math.max(0, Math.floor((maxTime - now) / 1000));
                         const minRemainingSeconds = Math.max(0, Math.floor((minTime - now) / 1000));
 
-                        lootlogTimers[name] = {
+                        const timerData = {
                             name: name,
                             type: timer.npc.type,
                             remainingSeconds: remainingSeconds,
@@ -194,11 +194,18 @@
                             location: timer.npc.location,
                             addedByName: timer.member?.name || null
                         };
+
+                        // Indeksuj po oryginalnej nazwie i lowercase dla bezpiecznego porownania
+                        lootlogTimers[name] = timerData;
+                        lootlogTimers[name.toLowerCase()] = timerData;
                     }
                 });
+
+                // Po zaladowaniu timerów odswiez aktualny komunikat
+                checkMapChange(true);
             })
             .catch(e => {
-                // Cicha obsługa błędu – timery zostaną puste
+                // Cicha obsluga bledu - timery zostana puste
             });
     }
 
@@ -636,9 +643,13 @@
                     let lootlogTimer = null;
                     if (lootlogTimers[npcName]) {
                         lootlogTimer = lootlogTimers[npcName];
+                    } else if (lootlogTimers[npcName.toLowerCase()]) {
+                        lootlogTimer = lootlogTimers[npcName.toLowerCase()];
                     } else {
+                        const npcNameLower = npcName.toLowerCase();
                         for (const key in lootlogTimers) {
-                            if (key.includes(npcName) || npcName.includes(key)) {
+                            const keyLower = key.toLowerCase();
+                            if (keyLower.includes(npcNameLower) || npcNameLower.includes(keyLower)) {
                                 lootlogTimer = lootlogTimers[key];
                                 break;
                             }
