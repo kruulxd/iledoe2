@@ -1,14 +1,13 @@
 // ==UserScript==
 // @name         Za ile respi Elita II & Tytan
 // @namespace    http://tampermonkey.net/
-// @version      1.5.3
+// @version      1.5.4
 // @description  Pokazuje timery elit II i tytanow z pelna integracja Lootlog
 // @author       Kruul
 // @match        https://*.margonem.pl/
 // @updateURL    https://raw.githubusercontent.com/kruulxd/iledoe2/main/za-ile-respi-addon.user.js
 // @downloadURL  https://raw.githubusercontent.com/kruulxd/iledoe2/main/za-ile-respi-addon.user.js
 // @supportURL   https://github.com/kruulxd/iledoe2/issues
-// @connect      api.lootlog.pl
 // @grant        none
 // ==/UserScript==
 
@@ -153,86 +152,277 @@
         }
     }
 
-    function parseTimers(timers) {
-        timers.forEach(timer => {
-            if (timer.npc && (timer.npc.type === 'ELITE2' || timer.npc.type === 'TITAN') && timer.npc.name) {
-                const name = timer.npc.name;
-
-                if (timer.npc.type === 'ELITE2') {
-                    hasEliteAccess = true;
-                } else if (timer.npc.type === 'TITAN') {
-                    hasTitanAccess = true;
-                }
-
-                const now = Date.now();
-                const minTime = new Date(timer.minSpawnTime).getTime();
-                const maxTime = new Date(timer.maxSpawnTime).getTime();
-
-                const remainingSeconds = Math.max(0, Math.floor((maxTime - now) / 1000));
-                const minRemainingSeconds = Math.max(0, Math.floor((minTime - now) / 1000));
-
-                const timerData = {
-                    name: name,
-                    type: timer.npc.type,
-                    remainingSeconds: remainingSeconds,
-                    minRemainingSeconds: minRemainingSeconds,
-                    minSpawnTime: timer.minSpawnTime,
-                    maxSpawnTime: timer.maxSpawnTime,
-                    location: timer.npc.location,
-                    addedByName: timer.member?.name || null
-                };
-
-                // Indeksuj po nazwie NPC i lokacji (nazwie mapy) – oryginalna i lowercase
-                lootlogTimers[name] = timerData;
-                lootlogTimers[name.toLowerCase()] = timerData;
-                if (timer.npc.location) {
-                    lootlogTimers[timer.npc.location] = timerData;
-                    lootlogTimers[timer.npc.location.toLowerCase()] = timerData;
-                }
-            }
-        });
+    function safeJsonParse(value) {
+        if (typeof value !== 'string') return null;
+        try {
+            return JSON.parse(value);
+        } catch (e) {
+            return null;
+        }
     }
 
-    function fetchLootlogTimers() {
-        lootlogTimers = {};
-        hasEliteAccess = false;
-        hasTitanAccess = false;
-        currentWorld = getWorld();
+    function toTimestamp(value) {
+        if (value === null || value === undefined) return null;
 
-        // Próba 1: odczyt z ll:query-cache (lokalny cache Lootloga, brak potrzeby autoryzacji)
+        if (typeof value === 'number' && Number.isFinite(value)) {
+            if (value > 1000000000000) return value;
+            if (value > 1000000000) return value * 1000;
+            return null;
+        }
+
+        if (typeof value === 'string') {
+            const numeric = Number(value);
+            if (Number.isFinite(numeric)) {
+                return toTimestamp(numeric);
+            }
+            const parsed = Date.parse(value);
+            return Number.isFinite(parsed) ? parsed : null;
+        }
+
+        return null;
+    }
+
+    function normalizeNpcType(rawType) {
+        if (!rawType || typeof rawType !== 'string') return null;
+        const type = rawType.toUpperCase();
+        if (type.includes('ELITE2')) return 'ELITE2';
+        if (type.includes('TITAN')) return 'TITAN';
+        return null;
+    }
+
+    function isLootlogStorageKey(key) {
+        if (!key || typeof key !== 'string') return false;
+        if (key === 'll:query-cache') return true;
+        if (key.startsWith('ll:')) return true;
+        return /lootlog|guild-timers|query-cache|timers?/i.test(key);
+    }
+
+    function getLootlogStorageEntries() {
+        const entries = [];
+
         try {
-            const cacheStr = localStorage.getItem('ll:query-cache');
-            if (cacheStr) {
-                const cache = JSON.parse(cacheStr);
-                if (cache.clientState && cache.clientState.queries) {
-                    const timersQuery = cache.clientState.queries.find(
-                        q => q.queryKey && q.queryKey[0] === 'guild-timers' && q.queryKey[1] === currentWorld
-                    );
-                    if (timersQuery && timersQuery.state && timersQuery.state.data) {
-                        parseTimers(timersQuery.state.data);
-                        checkMapChange(true);
-                        return;
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                if (!isLootlogStorageKey(key)) continue;
+                const value = localStorage.getItem(key);
+                if (typeof value !== 'string' || value.length < 2) continue;
+                entries.push([key, value]);
+            }
+        } catch (e) {
+        }
+
+        entries.sort((a, b) => {
+            if (a[0] === 'll:query-cache') return -1;
+            if (b[0] === 'll:query-cache') return 1;
+            return a[0].localeCompare(b[0]);
+        });
+
+        return entries;
+    }
+
+    function getLootlogStorageFingerprint() {
+        try {
+            const entries = getLootlogStorageEntries();
+            if (!entries.length) return '';
+            // Używaj tylko długości i krótkiego prefixu – unikaj drogiego slice na dużych stringach
+            return entries
+                .map(([key, value]) => `${key}:${value.length}`)
+                .join('|');
+        } catch (e) {
+            return '';
+        }
+    }
+
+    function collectGuildTimerArrays(root, world) {
+        const arrays = [];
+        const seen = new WeakSet();
+
+        function visit(node) {
+            if (!node || typeof node !== 'object') return;
+            if (seen.has(node)) return;
+            seen.add(node);
+
+            if (Array.isArray(node)) {
+                node.forEach(visit);
+                return;
+            }
+
+            const queryKey = node.queryKey;
+            if (Array.isArray(queryKey) && queryKey[0] === 'guild-timers') {
+                const queryWorld = String(queryKey[1] || '').toLowerCase();
+                if (!world || !queryWorld || queryWorld === world) {
+                    const data = node.state?.data ?? node.data ?? node.payload?.data;
+                    if (Array.isArray(data)) {
+                        arrays.push(data);
                     }
                 }
             }
-        } catch (e) {}
 
-        // Próba 2: bezpośrednie API (wymaga zalogowanej sesji Lootlog w przeglądarce)
-        fetch(`https://api.lootlog.pl/timers?world=${encodeURIComponent(currentWorld)}`, {
-            credentials: 'include'
-        })
-            .then(response => {
-                if (!response.ok) throw new Error('API error: ' + response.status);
-                return response.json();
-            })
-            .then(timers => {
-                if (!Array.isArray(timers)) return;
-                parseTimers(timers);
-                checkMapChange(true);
-            })
-            .catch(e => {
-                // Cicha obsługa błędu – timery zostaną puste
-            });
+            if (typeof node.state === 'string') {
+                const parsedState = safeJsonParse(node.state);
+                if (parsedState) visit(parsedState);
+            }
+            if (typeof node.clientState === 'string') {
+                const parsedClientState = safeJsonParse(node.clientState);
+                if (parsedClientState) visit(parsedClientState);
+            }
+
+            Object.values(node).forEach(visit);
+        }
+
+        visit(root);
+        return arrays;
+    }
+
+    function normalizeTimerEntry(timer, now) {
+        if (!timer || typeof timer !== 'object') return null;
+
+        const npc = timer.npc || timer.mob || timer.monster || timer.entity || {};
+        const type = normalizeNpcType(
+            npc.type || timer.type || timer.npcType || timer.mobType || timer.kind
+        );
+        const name =
+            npc.name || timer.name || timer.npcName || timer.mobName || timer.entityName || null;
+
+        if (!type || !name) return null;
+
+        let minRaw =
+            timer.minSpawnTime ??
+            timer.minRespawnTime ??
+            timer.minRespTime ??
+            timer.minTime ??
+            timer.respawnFrom;
+        let maxRaw =
+            timer.maxSpawnTime ??
+            timer.maxRespawnTime ??
+            timer.maxRespTime ??
+            timer.maxTime ??
+            timer.respawnTo ??
+            timer.spawnTime;
+
+        let minTime = toTimestamp(minRaw);
+        let maxTime = toTimestamp(maxRaw);
+
+        if (maxTime === null) {
+            const remaining = Number(timer.remainingSeconds ?? timer.remaining ?? timer.timeLeft);
+            if (Number.isFinite(remaining) && remaining >= 0) {
+                maxTime = now + remaining * 1000;
+            }
+        }
+
+        if (minTime === null) {
+            minTime = maxTime;
+        }
+
+        if (maxTime === null) {
+            return null;
+        }
+
+        return {
+            name,
+            type,
+            remainingSeconds: Math.max(0, Math.floor((maxTime - now) / 1000)),
+            minRemainingSeconds: Math.max(0, Math.floor((minTime - now) / 1000)),
+            minSpawnTime: minRaw ?? null,
+            maxSpawnTime: maxRaw ?? null,
+            location: npc.location || timer.location || null,
+            addedByName:
+                timer.member?.name ||
+                timer.addedByName ||
+                timer.addedBy?.name ||
+                timer.author?.name ||
+                null
+        };
+    }
+
+    function parseTimersFromLootlogStorage(world) {
+        const now = Date.now();
+        const parsedTimers = {};
+
+        const entries = getLootlogStorageEntries();
+        for (const [, rawValue] of entries) {
+            const parsed = safeJsonParse(rawValue);
+            if (!parsed) continue;
+
+            const roots = [parsed];
+            if (typeof parsed.state === 'string') {
+                const parsedState = safeJsonParse(parsed.state);
+                if (parsedState) roots.push(parsedState);
+            }
+            if (typeof parsed.clientState === 'string') {
+                const parsedClientState = safeJsonParse(parsed.clientState);
+                if (parsedClientState) roots.push(parsedClientState);
+            }
+
+            for (const root of roots) {
+                const timerArrays = collectGuildTimerArrays(root, world);
+                for (const timers of timerArrays) {
+                    timers.forEach((timer) => {
+                        const normalized = normalizeTimerEntry(timer, now);
+                        if (!normalized) return;
+
+                        const existing = parsedTimers[normalized.name];
+                        if (!existing || normalized.remainingSeconds < existing.remainingSeconds) {
+                            parsedTimers[normalized.name] = normalized;
+                        }
+                    });
+                }
+            }
+        }
+
+        return parsedTimers;
+    }
+
+    function fetchLootlogTimers(callback) {
+        // Przenieś ciężkie parsowanie poza główny wątek renderowania
+        const doWork = () => {
+            try {
+                const newTimers = {};
+                let newHasElite = false;
+                let newHasTitan = false;
+                const world = getWorld();
+
+                const parsedTimers = parseTimersFromLootlogStorage(world);
+                Object.values(parsedTimers).forEach((timer) => {
+                    newTimers[timer.name] = timer;
+                    if (timer.type === 'ELITE2') newHasElite = true;
+                    else if (timer.type === 'TITAN') newHasTitan = true;
+                });
+
+                if (Object.keys(newTimers).length === 0) {
+                    const lootlogTimerDiv = document.querySelector('.elite-timer-wnd, [class*="ll-timer"]');
+                    if (lootlogTimerDiv) {
+                        const timerText = lootlogTimerDiv.textContent;
+                        const timerRegex = /\[E2?\]\s*([^\d]+?)(\d{2}:\d{2}:\d{2})/g;
+                        let match;
+                        while ((match = timerRegex.exec(timerText)) !== null) {
+                            const name = match[1].trim();
+                            const time = match[2];
+                            const [hours, minutes, seconds] = time.split(':').map(Number);
+                            newTimers[name] = {
+                                name,
+                                remainingSeconds: hours * 3600 + minutes * 60 + seconds,
+                                timeString: time
+                            };
+                        }
+                    }
+                }
+
+                // Atomowe przypisanie – UI widzi albo stare albo nowe dane, nie stan w połowie
+                lootlogTimers = newTimers;
+                hasEliteAccess = newHasElite;
+                hasTitanAccess = newHasTitan;
+                currentWorld = world;
+
+                if (typeof callback === 'function') callback();
+            } catch (e) {}
+        };
+
+        if (typeof requestIdleCallback === 'function') {
+            requestIdleCallback(doWork, { timeout: 2000 });
+        } else {
+            setTimeout(doWork, 0);
+        }
     }
 
     function waitForEngine(callback) {
@@ -278,7 +468,7 @@
         const spacing = 35;
         const offset = 10;
         const bounds = getGameCanvasBounds();
-
+        
         const positions = {
             'top-left': {
                 top: `${bounds.top + offset + (index * spacing)}px`,
@@ -332,10 +522,10 @@
     function showToast(eliteName, lootlogTimer = null, index = 0, npcType = 'ELITE2') {
         const safeEliteName = eliteName.replace(/[^a-zA-Z0-9]/g, '-');
         const toastId = `elite-toast-${safeEliteName}`;
-
+        
         const existingToast = document.getElementById(toastId);
         const isNewToast = !existingToast;
-
+        
         if (existingToast) {
             existingToast.remove();
         }
@@ -343,12 +533,12 @@
         const toast = document.createElement('div');
         toast.id = toastId;
         toast.className = 'elite-toast';
-
+        
         const hasLootlogTimer = lootlogTimer && lootlogTimer.remainingSeconds !== undefined;
         const isTitan = lootlogTimer && lootlogTimer.type === 'TITAN';
-
+        
         const posStyle = getPositionStyle(index);
-
+        
         toast.style.cssText = `
             position: fixed;
             top: ${posStyle.top};
@@ -367,17 +557,17 @@
             backdrop-filter: blur(5px);
             pointer-events: auto;
         `;
-
+        
         const timerElementId = `timer-${safeEliteName}`;
-
+        
         if (hasLootlogTimer) {
             const totalSeconds = lootlogTimer.remainingSeconds;
             const minSeconds = lootlogTimer.minRemainingSeconds || 0;
-
+            
             let timerColor = '#00ff88';
             let labelText = 'respi za';
             let nameColor = isTitan ? '#ff3333' : '#ff6b9d';
-
+            
             if (isTitan) {
                 if (minSeconds > 0) {
                     timerColor = '#fff';
@@ -387,7 +577,7 @@
                     labelText = 'respi jeszcze przez';
                 }
             }
-
+            
             toast.innerHTML = `
                 <div style="display: flex; align-items: center; gap: 8px;">
                     <span style="color: ${nameColor}; font-weight: bold;">${eliteName}</span>
@@ -399,7 +589,7 @@
         } else {
             let noTimerMessage, messageColor;
             let nameColor = npcType === 'TITAN' ? '#ff3333' : '#ff6b9d';
-
+            
             if (npcType === 'TITAN') {
                 const hasAccess = hasTitanAccess;
                 noTimerMessage = hasAccess ? `${eliteName} wybity` : 'Brak dost\u0119pu do timera';
@@ -408,7 +598,7 @@
                 noTimerMessage = 'nie ma na timerze';
                 messageColor = '#999';
             }
-
+            
             toast.innerHTML = `
                 <div style="display: flex; align-items: center; gap: 8px;">
                     <span style="color: ${nameColor}; font-weight: bold;">${eliteName}</span>
@@ -452,14 +642,14 @@
             let remainingSeconds = totalSeconds;
             let minRemainingSeconds = minSeconds;
             const timerElement = document.getElementById(timerElementId);
-
+            
             const interval = setInterval(() => {
                 remainingSeconds--;
                 minRemainingSeconds--;
-
+                
                 if (remainingSeconds > 0 && timerElement) {
                     timerElement.textContent = formatTime(remainingSeconds);
-
+                    
                     if (isTitan) {
                         const labelSpan = toast.querySelector('span[style*="color: #fff"]');
                         if (minRemainingSeconds > 0) {
@@ -511,20 +701,20 @@
         const hours = Math.floor(seconds / 3600);
         const minutes = Math.floor((seconds % 3600) / 60);
         const secs = seconds % 60;
-
+        
         return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
     }
 
     function showMatherWarning() {
         const warningId = 'mather-warning';
-
+        
         const heronameElement = document.querySelector('.heroname');
         const rawNick = heronameElement ? heronameElement.textContent.trim() : '';
         const currentPlayerNick = rawNick.replace(/\s*\(\d+p\)$/, '');
-
+        
         console.log('[MATHER DEBUG] Raw nick from .heroname:', rawNick);
         console.log('[MATHER DEBUG] Cleaned nick:', currentPlayerNick);
-
+        
         const matherNicks = [
             'Captain Plum',
             'Eldakhion',
@@ -533,31 +723,31 @@
             'Grzegorz Braun',
             'Vargoth'
         ];
-
+        
         const isExcluded = matherNicks.some(nick => nick.toLowerCase() === currentPlayerNick.toLowerCase());
         console.log('[MATHER DEBUG] Is excluded:', isExcluded);
-
+        
         if (isExcluded) {
             matherWarningShown = true;
             console.log('[MATHER DEBUG] Ostrzeżenie zablokowane - jesteś na liście wykluczonych');
             return;
         }
-
+        
         if (matherWarningShown) {
             return;
         }
-
+        
         const existing = document.getElementById(warningId);
         if (existing) {
             return;
         }
-
+        
         matherWarningShown = true;
 
         const bounds = getGameCanvasBounds();
         const warning = document.createElement('div');
         warning.id = warningId;
-
+        
         warning.style.cssText = `
             position: fixed;
             top: ${bounds.top + bounds.height / 2}px;
@@ -579,7 +769,7 @@
             pointer-events: auto;
             cursor: pointer;
         `;
-
+        
         warning.innerHTML = `
             <div style="display: flex; align-items: center; gap: 15px; justify-content: center;">
                 <span style="font-size: 32px; animation: warningShake 0.5s ease-in-out infinite;">⚠️</span>
@@ -587,7 +777,7 @@
                 <span style="font-size: 32px; animation: warningShake 0.5s ease-in-out infinite;">⚠️</span>
             </div>
         `;
-
+        
         // Dodaj style dla animacji
         const style = document.createElement('style');
         style.textContent = `
@@ -619,16 +809,16 @@
             style.id = 'mather-warning-style';
             document.head.appendChild(style);
         }
-
+        
         document.body.appendChild(warning);
-
+        
         warning.addEventListener('click', () => {
             warning.style.animation = 'fadeOut 0.3s ease-out';
             setTimeout(() => warning.remove(), 300);
         });
-
+        
         warning.title = 'Kliknij aby zamknąć';
-
+        
         setTimeout(() => {
             if (warning.parentNode) {
                 warning.style.animation = 'fadeOut 0.5s ease-out';
@@ -649,58 +839,44 @@
 
     function checkMapChange(forceRefresh = false) {
         const newMapName = getCurrentMapName();
-
+        
         if (newMapName && (newMapName !== currentMapName || forceRefresh)) {
             if (newMapName !== currentMapName) {
                 currentMapName = newMapName;
                 matherWarningShown = false;
             }
-
+            
             const eliteData = ELITE_II_DATA[currentMapName];
             const titanData = TITAN_DATA[currentMapName];
             const npcData = eliteData || titanData;
             const npcType = titanData ? 'TITAN' : 'ELITE2';
-
+            
             if (npcData) {
                 const npcNames = npcData.split('/').map(n => n.trim());
                 let matherDetected = false;
-
+                
                 npcNames.forEach((npcName, index) => {
                     let lootlogTimer = null;
-
-                    // 1. Szukaj po nazwie mapy (lokacji) – najbardziej niezawodne
-                    if (lootlogTimers[currentMapName]) {
-                        lootlogTimer = lootlogTimers[currentMapName];
-                    } else if (lootlogTimers[currentMapName.toLowerCase()]) {
-                        lootlogTimer = lootlogTimers[currentMapName.toLowerCase()];
-                    }
-                    // 2. Szukaj po nazwie NPC
-                    else if (lootlogTimers[npcName]) {
+                    if (lootlogTimers[npcName]) {
                         lootlogTimer = lootlogTimers[npcName];
-                    } else if (lootlogTimers[npcName.toLowerCase()]) {
-                        lootlogTimer = lootlogTimers[npcName.toLowerCase()];
-                    }
-                    // 3. Szukaj częściowe dopasowanie po nazwie NPC
-                    else {
-                        const npcNameLower = npcName.toLowerCase();
+                    } else {
                         for (const key in lootlogTimers) {
-                            const keyLower = key.toLowerCase();
-                            if (keyLower.includes(npcNameLower) || npcNameLower.includes(keyLower)) {
+                            if (key.includes(npcName) || npcName.includes(key)) {
                                 lootlogTimer = lootlogTimers[key];
                                 break;
                             }
                         }
                     }
-
+                    
                     if (lootlogTimer && lootlogTimer.addedByName && npcType === 'ELITE2') {
                         if (lootlogTimer.addedByName.toLowerCase().includes('ilmather')) {
                             matherDetected = true;
                         }
                     }
-
+                    
                     showToast(npcName, lootlogTimer, index, npcType);
                 });
-
+                
                 if (matherDetected) {
                     showMatherWarning();
                 }
@@ -712,32 +888,56 @@
 
     function setupNpcKillListener() {
         try {
-            // Nasłuchuj zmian w cache Lootloga (gdy Lootlog odświeży timery)
             window.addEventListener('storage', function(e) {
-                if (e.key === 'll:query-cache' || e.key === null) {
-                    fetchLootlogTimers();
+                if (e.key === null || isLootlogStorageKey(e.key)) {
+                    // Odłóż parsowanie – storage event może przyjść w środku animacji/walki
                     setTimeout(() => {
-                        const mapName = getCurrentMapName();
-                        if (mapName && (ELITE_II_DATA[mapName] || TITAN_DATA[mapName])) {
-                            checkMapChange(true);
-                        }
-                    }, 500);
+                        fetchLootlogTimers(() => {
+                            const mapName = getCurrentMapName();
+                            if (mapName && (ELITE_II_DATA[mapName] || TITAN_DATA[mapName])) {
+                                checkMapChange(true);
+                            }
+                        });
+                    }, 300);
                 }
             });
-
+            
+            let lastCacheHash = '';
+            setInterval(() => {
+                // Fingerprint check jest lekki, ale parsowanie robimy tylko gdy coś się zmieniło
+                const checkFn = () => {
+                    try {
+                        const newHash = getLootlogStorageFingerprint();
+                        if (newHash && lastCacheHash && lastCacheHash !== newHash) {
+                            fetchLootlogTimers(() => {
+                                const mapName = getCurrentMapName();
+                                if (mapName && (ELITE_II_DATA[mapName] || TITAN_DATA[mapName])) {
+                                    checkMapChange(true);
+                                }
+                            });
+                        }
+                        lastCacheHash = newHash;
+                    } catch (e) {}
+                };
+                if (typeof requestIdleCallback === 'function') {
+                    requestIdleCallback(checkFn, { timeout: 3000 });
+                } else {
+                    setTimeout(checkFn, 0);
+                }
+            }, 10000);
+            
             if (window.Engine?.battle) {
                 const originalBattleEnd = window.Engine.battle.endBattle;
                 if (typeof originalBattleEnd === 'function') {
                     window.Engine.battle.endBattle = function(...args) {
                         const result = originalBattleEnd.apply(this, args);
                         setTimeout(() => {
-                            fetchLootlogTimers();
-                            setTimeout(() => {
+                            fetchLootlogTimers(() => {
                                 const mapName = getCurrentMapName();
-                                if (mapName && ELITE_II_DATA[mapName]) {
+                                if (mapName && (ELITE_II_DATA[mapName] || TITAN_DATA[mapName])) {
                                     checkMapChange(true);
                                 }
-                            }, 1000);
+                            });
                         }, 2000);
                         return result;
                     };
@@ -748,14 +948,19 @@
     }
 
     function init() {
-        fetchLootlogTimers();
+        fetchLootlogTimers(() => checkMapChange(true));
 
-        setInterval(fetchLootlogTimers, 20000);
-
+        setInterval(() => fetchLootlogTimers(() => {
+            const mapName = getCurrentMapName();
+            if (mapName && (ELITE_II_DATA[mapName] || TITAN_DATA[mapName])) {
+                checkMapChange(true);
+            }
+        }), 20000);
+        
         checkMapChange();
-
+        
         setInterval(checkMapChange, 2000);
-
+        
         try {
             if (window.Engine?.map) {
                 const originalMapChange = window.Engine.map.change;
@@ -768,16 +973,16 @@
             }
         } catch (e) {
         }
-
+        
         setupNpcKillListener();
         createPositionSettings();
-
+        
         window.addEventListener('resize', () => {
             const mapName = getCurrentMapName();
             if (mapName && (ELITE_II_DATA[mapName] || TITAN_DATA[mapName])) {
                 checkMapChange(true);
             }
-
+            
             const matherWarning = document.getElementById('mather-warning');
             if (matherWarning) {
                 const bounds = getGameCanvasBounds();
@@ -791,7 +996,7 @@
         const settingsButton = document.createElement('div');
         settingsButton.id = 'elite-position-settings-btn';
         settingsButton.innerHTML = '⚙️';
-
+        
         function updateButtonPosition() {
             const bounds = getGameCanvasBounds();
             settingsButton.style.cssText = `
@@ -814,26 +1019,26 @@
                 backdrop-filter: blur(5px);
             `;
         }
-
+        
         updateButtonPosition();
         settingsButton.title = 'Ustawienia pozycji komunikatów E2/Tytan';
-
+        
         settingsButton.addEventListener('mouseenter', () => {
             settingsButton.style.transform = 'scale(1.1)';
             settingsButton.style.background = 'rgba(40, 40, 40, 0.9)';
         });
-
+        
         settingsButton.addEventListener('mouseleave', () => {
             settingsButton.style.transform = 'scale(1)';
             settingsButton.style.background = 'rgba(20, 20, 20, 0.8)';
         });
-
+        
         settingsButton.addEventListener('click', () => {
             showPositionPanel();
         });
-
+        
         document.body.appendChild(settingsButton);
-
+        
         window.addEventListener('resize', updateButtonPosition);
     }
 
@@ -885,8 +1090,8 @@
         positions.forEach(pos => {
             const isActive = toastPosition === pos.value;
             html += `
-                <button
-                    class="position-btn"
+                <button 
+                    class="position-btn" 
                     data-position="${pos.value}"
                     style="
                         padding: 8px 6px;
