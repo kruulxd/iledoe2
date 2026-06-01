@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Za ile respi Elita II & Tytan
 // @namespace    http://tampermonkey.net/
-// @version      1.5.1
+// @version      1.5.2
 // @description  Pokazuje timery elit II i tytanow z pelna integracja Lootlog
 // @author       Kruul
 // @match        https://*.margonem.pl/
@@ -195,9 +195,13 @@
                             addedByName: timer.member?.name || null
                         };
 
-                        // Indeksuj po oryginalnej nazwie i lowercase dla bezpiecznego porownania
+                        // Indeksuj po nazwie NPC i po lokacji (nazwie mapy) – obie wersje lowercase
                         lootlogTimers[name] = timerData;
                         lootlogTimers[name.toLowerCase()] = timerData;
+                        if (timer.npc.location) {
+                            lootlogTimers[timer.npc.location] = timerData;
+                            lootlogTimers[timer.npc.location.toLowerCase()] = timerData;
+                        }
                     }
                 });
 
@@ -641,11 +645,21 @@
 
                 npcNames.forEach((npcName, index) => {
                     let lootlogTimer = null;
-                    if (lootlogTimers[npcName]) {
+
+                    // 1. Szukaj po nazwie mapy (lokacji) – najbardziej niezawodne
+                    if (lootlogTimers[currentMapName]) {
+                        lootlogTimer = lootlogTimers[currentMapName];
+                    } else if (lootlogTimers[currentMapName.toLowerCase()]) {
+                        lootlogTimer = lootlogTimers[currentMapName.toLowerCase()];
+                    }
+                    // 2. Szukaj po nazwie NPC
+                    else if (lootlogTimers[npcName]) {
                         lootlogTimer = lootlogTimers[npcName];
                     } else if (lootlogTimers[npcName.toLowerCase()]) {
                         lootlogTimer = lootlogTimers[npcName.toLowerCase()];
-                    } else {
+                    }
+                    // 3. Szukaj częściowe dopasowanie po nazwie NPC
+                    else {
                         const npcNameLower = npcName.toLowerCase();
                         for (const key in lootlogTimers) {
                             const keyLower = key.toLowerCase();
