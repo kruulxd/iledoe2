@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Za ile respi Elita II & Tytan
 // @namespace    http://tampermonkey.net/
-// @version      1.5.9
+// @version      1.5.10
 // @description  Pokazuje timery elit II i tytanow z pelna integracja Lootlog
 // @author       Kruul
 // @match        https://*.margonem.pl/
@@ -972,6 +972,103 @@
                     }, 300);
                 }
             });
+            
+            // Hook na koniec walki w updateData - tu przychodzą dane o walce
+            if (window.Engine?.battle?.updateData) {
+                const origUpdate = window.Engine.battle.updateData;
+                window.Engine.battle.updateData = function(data, isRound) {
+                    // Sprawdź czy walka się skończyła i czy był pokonany przeciwnik
+                    if (data && data.endBattle && data.m && Array.isArray(data.m)) {
+                        try {
+                            // Wyciągnij nazwę przegranego z battle loga
+                            let defeatedName = null;
+                            for (let line of data.m) {
+                                if (typeof line === 'string' && line.includes('loser=')) {
+                                    const match = line.match(/loser=([^;]+)/);
+                                    if (match) {
+                                        defeatedName = match[1];
+                                        break;
+                                    }
+                                }
+                            }
+                            
+                            if (defeatedName) {
+                                // Rozdziel na poszczególne postacie (mogą być przegrupowane)
+                                const defeatedList = defeatedName.split(',').map(n => n.trim());
+                                
+                                // Sprawdź czy jakiś pokonany to nasza ELITE lub TITAN
+                                let eliteDefeated = null;
+                                let eliteType = null;
+                                const currentMap = getCurrentMapName();
+                                
+                                if (currentMap) {
+                                    const eliteData = ELITE_II_DATA[currentMap];
+                                    const titanData = TITAN_DATA[currentMap];
+                                    
+                                    // Szukaj w ELITE_II_DATA
+                                    if (eliteData) {
+                                        const eliteNames = eliteData.split('/').map(n => n.trim());
+                                        for (let defeated of defeatedList) {
+                                            if (eliteNames.includes(defeated)) {
+                                                eliteDefeated = defeated;
+                                                eliteType = 'ELITE2';
+                                                break;
+                                            }
+                                        }
+                                    }
+                                    
+                                    // Szukaj w TITAN_DATA
+                                    if (!eliteDefeated && titanData) {
+                                        const titanNames = titanData.split('/').map(n => n.trim());
+                                        for (let defeated of defeatedList) {
+                                            if (titanNames.includes(defeated)) {
+                                                eliteDefeated = defeated;
+                                                eliteType = 'TITAN';
+                                                break;
+                                            }
+                                        }
+                                    }
+                                    
+                                    // Jeśli to nasza ELITE/TITAN - odśwież timery
+                                    if (eliteDefeated) {
+                                        console.log(`[iledoe2] ${eliteType} defeated: ${eliteDefeated}`);
+                                        
+                                        // Odśwież timery - będzie nowy timer dla tego NPC
+                                        setTimeout(() => {
+                                            fetchLootlogTimers(() => {
+                                                checkMapChange(true);
+                                                
+                                                // Pokaż powiadomienie
+                                                const message = `${eliteDefeated} zrespił!`;
+                                                console.log(`[iledoe2] ${message}`);
+                                                
+                                                // Jeśli jest toast system - pokaż tam
+                                                if (window.Toastify) {
+                                                    Toastify({
+                                                        text: message,
+                                                        duration: 5000,
+                                                        gravity: 'bottom',
+                                                        position: 'center',
+                                                        backgroundColor: '#4CAF50',
+                                                        className: 'iledoe2-respawn-toast'
+                                                    }).showToast();
+                                                }
+                                            });
+                                        }, 500);
+                                    }
+                                }
+                            }
+                        } catch (e) {
+                            console.error('[iledoe2] Battle end hook error:', e);
+                        }
+                    }
+                    
+                    return origUpdate.call(this, data, isRound);
+                };
+            }
+        } catch (e) {
+        }
+    }
             
             if (window.Engine?.battle) {
                 const originalBattleEnd = window.Engine.battle.endBattle;
