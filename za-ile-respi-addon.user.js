@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Za ile respi Elita II & Tytan
 // @namespace    http://tampermonkey.net/
-// @version      1.5.8
+// @version      1.5.9
 // @description  Pokazuje timery elit II i tytanow z pelna integracja Lootlog
 // @author       Kruul
 // @match        https://*.margonem.pl/
@@ -368,12 +368,18 @@
                 hasTitanAccess = false;
                 currentWorld = getWorld();
 
+                // Timeout na 5s — jeśli API nie odpowie, fallback
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 5000);
+
                 // Próba 1: Świeże dane z API (prioritet) - credentials: include wysyła cookies
                 fetch(`https://api.lootlog.pl/timers?world=${encodeURIComponent(currentWorld)}`, {
                     credentials: 'include',
-                    mode: 'cors'
+                    mode: 'cors',
+                    signal: controller.signal
                 })
                     .then(res => {
+                        clearTimeout(timeoutId);
                         if (!res.ok) throw new Error('API status ' + res.status);
                         return res.json();
                     })
@@ -388,8 +394,9 @@
                                 const maxTime = new Date(timer.maxSpawnTime).getTime();
                                 const minTime = new Date(timer.minSpawnTime).getTime();
 
-                                lootlogTimers[timer.npc.name] = {
-                                    name: timer.npc.name,
+                                const name = timer.npc.name;
+                                const timerData = {
+                                    name: name,
                                     type: timer.npc.type,
                                     remainingSeconds: Math.max(0, Math.floor((maxTime - now) / 1000)),
                                     minRemainingSeconds: Math.max(0, Math.floor((minTime - now) / 1000)),
@@ -399,19 +406,31 @@
                                     addedByName: timer.member?.name || null
                                 };
 
+                                // Indeksuj po nazwie i lowercase dla szybkiego dostępu
+                                lootlogTimers[name] = timerData;
+                                lootlogTimers[name.toLowerCase()] = timerData;
+
                                 if (timer.npc.type === 'ELITE2') hasEliteAccess = true;
                                 else if (timer.npc.type === 'TITAN') hasTitanAccess = true;
                             }
                         });
 
-                        if (callback) callback();
+                        // Callback w requestIdleCallback aby nie blokować gry
+                        if (callback) {
+                            if (typeof requestIdleCallback === 'function') {
+                                requestIdleCallback(callback, { timeout: 500 });
+                            } else {
+                                callback();
+                            }
+                        }
                     })
                     .catch(apiError => {
-                        console.log('[iledoe2] API fallback:', apiError.message);
-                        // Próba 2: Fallback na cache + DOM jeśli API nie zadziała
+                        clearTimeout(timeoutId);
+                        // Próba 2: Fallback na cache jeśli API nie zadziała
                         const parsedTimers = parseTimersFromLootlogStorage(currentWorld);
                         Object.values(parsedTimers).forEach((timer) => {
                             lootlogTimers[timer.name] = timer;
+                            lootlogTimers[timer.name.toLowerCase()] = timer;
                             if (timer.type === 'ELITE2') hasEliteAccess = true;
                             else if (timer.type === 'TITAN') hasTitanAccess = true;
                         });
@@ -435,7 +454,13 @@
                             }
                         }
 
-                        if (callback) callback();
+                        if (callback) {
+                            if (typeof requestIdleCallback === 'function') {
+                                requestIdleCallback(callback, { timeout: 500 });
+                            } else {
+                                callback();
+                            }
+                        }
                     });
             } catch (e) {
                 console.error('[iledoe2] fetch error:', e);
@@ -864,51 +889,70 @@
     }
 
     function checkMapChange(forceRefresh = false) {
-        const newMapName = getCurrentMapName();
-        
-        if (newMapName && (newMapName !== currentMapName || forceRefresh)) {
-            if (newMapName !== currentMapName) {
-                currentMapName = newMapName;
-                matherWarningShown = false;
-            }
+        const doCheck = () => {
+            const newMapName = getCurrentMapName();
             
-            const eliteData = ELITE_II_DATA[currentMapName];
-            const titanData = TITAN_DATA[currentMapName];
-            const npcData = eliteData || titanData;
-            const npcType = titanData ? 'TITAN' : 'ELITE2';
-            
-            if (npcData) {
-                const npcNames = npcData.split('/').map(n => n.trim());
-                let matherDetected = false;
+            if (newMapName && (newMapName !== currentMapName || forceRefresh)) {
+                if (newMapName !== currentMapName) {
+                    currentMapName = newMapName;
+                    matherWarningShown = false;
+                }
                 
-                npcNames.forEach((npcName, index) => {
-                    let lootlogTimer = null;
-                    if (lootlogTimers[npcName]) {
-                        lootlogTimer = lootlogTimers[npcName];
-                    } else {
-                        for (const key in lootlogTimers) {
-                            if (key.includes(npcName) || npcName.includes(key)) {
-                                lootlogTimer = lootlogTimers[key];
-                                break;
+                const eliteData = ELITE_II_DATA[currentMapName];
+                const titanData = TITAN_DATA[currentMapName];
+                const npcData = eliteData || titanData;
+                const npcType = titanData ? 'TITAN' : 'ELITE2';
+                
+                if (npcData) {
+                    const npcNames = npcData.split('/').map(n => n.trim());
+                    let matherDetected = false;
+                    
+                    npcNames.forEach((npcName, index) => {
+                        let lootlogTimer = null;
+                        const nameLower = npcName.toLowerCase();
+                        
+                        // Szybkie wyszukiwanie — najpierw exact match
+                        if (lootlogTimers[npcName]) {
+                            lootlogTimer = lootlogTimers[npcName];
+                        } else if (lootlogTimers[nameLower]) {
+                            lootlogTimer = lootlogTimers[nameLower];
+                        } else {
+                            // Tylko jeśli exact match nie zadziała — szukaj fuzzy
+                            // Ale przejrzyj tylko pierwszych 20 kluczy (ELITE2 zwykle <10)
+                            let count = 0;
+                            for (const key in lootlogTimers) {
+                                if (count++ > 20) break;
+                                const keyLower = key.toLowerCase();
+                                if (keyLower.includes(nameLower) || nameLower.includes(keyLower)) {
+                                    lootlogTimer = lootlogTimers[key];
+                                    break;
+                                }
                             }
                         }
-                    }
-                    
-                    if (lootlogTimer && lootlogTimer.addedByName && npcType === 'ELITE2') {
-                        if (lootlogTimer.addedByName.toLowerCase().includes('ilmather')) {
-                            matherDetected = true;
+                        
+                        if (lootlogTimer && lootlogTimer.addedByName && npcType === 'ELITE2') {
+                            if (lootlogTimer.addedByName.toLowerCase().includes('ilmather')) {
+                                matherDetected = true;
+                            }
                         }
-                    }
+                        
+                        showToast(npcName, lootlogTimer, index, npcType);
+                    });
                     
-                    showToast(npcName, lootlogTimer, index, npcType);
-                });
-                
-                if (matherDetected) {
-                    showMatherWarning();
+                    if (matherDetected) {
+                        showMatherWarning();
+                    }
+                } else {
+                    removeAllToasts();
                 }
-            } else {
-                removeAllToasts();
             }
+        };
+
+        // Wykonaj gdy gra nie rysuje
+        if (typeof requestIdleCallback === 'function') {
+            requestIdleCallback(doCheck, { timeout: 1000 });
+        } else {
+            doCheck();
         }
     }
 
