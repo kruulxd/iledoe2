@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Za ile respi Elita II & Tytan
 // @namespace    http://tampermonkey.net/
-// @version      1.5.11
+// @version      1.5.12
 // @description  Pokazuje timery elit II i tytanow z pelna integracja Lootlog
 // @author       Kruul
 // @match        https://*.margonem.pl/
@@ -220,18 +220,6 @@
         return entries;
     }
 
-    function getLootlogStorageFingerprint() {
-        try {
-            const entries = getLootlogStorageEntries();
-            if (!entries.length) return '';
-            return entries
-                .map(([key, value]) => `${key}:${value.length}:${value.slice(0, 120)}`)
-                .join('|');
-        } catch (e) {
-            return '';
-        }
-    }
-
     function collectGuildTimerArrays(root, world) {
         const arrays = [];
         const seen = new WeakSet();
@@ -372,50 +360,119 @@
         return parsedTimers;
     }
 
-    function fetchLootlogTimers() {
-        try {
-            lootlogTimers = {};
-            hasEliteAccess = false;
-            hasTitanAccess = false;
-            currentWorld = getWorld();
+    function fetchLootlogTimers(callback) {
+        const doFetch = () => {
+            try {
+                lootlogTimers = {};
+                hasEliteAccess = false;
+                hasTitanAccess = false;
+                currentWorld = getWorld();
 
-            const parsedTimers = parseTimersFromLootlogStorage(currentWorld);
-            Object.values(parsedTimers).forEach((timer) => {
-                lootlogTimers[timer.name] = timer;
-                if (timer.type === 'ELITE2') {
-                    hasEliteAccess = true;
-                } else if (timer.type === 'TITAN') {
-                    hasTitanAccess = true;
-                }
-            });
+                // Timeout na 5s — jeśli API nie odpowie, fallback
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 5000);
 
-            if (Object.keys(lootlogTimers).length > 0) {
-                return;
+                // Próba 1: Świeże dane z API (prioritet) - credentials: include wysyła cookies
+                fetch(`https://api.lootlog.pl/timers?world=${encodeURIComponent(currentWorld)}`, {
+                    credentials: 'include',
+                    mode: 'cors',
+                    signal: controller.signal
+                })
+                    .then(res => {
+                        clearTimeout(timeoutId);
+                        if (!res.ok) throw new Error('API status ' + res.status);
+                        return res.json();
+                    })
+                    .then(timers => {
+                        if (!Array.isArray(timers) || timers.length === 0) {
+                            throw new Error('No timers in API');
+                        }
+
+                        timers.forEach(timer => {
+                            if (timer?.npc?.name && (timer.npc.type === 'ELITE2' || timer.npc.type === 'TITAN')) {
+                                const now = Date.now();
+                                const maxTime = new Date(timer.maxSpawnTime).getTime();
+                                const minTime = new Date(timer.minSpawnTime).getTime();
+
+                                const name = timer.npc.name;
+                                const timerData = {
+                                    name: name,
+                                    type: timer.npc.type,
+                                    remainingSeconds: Math.max(0, Math.floor((maxTime - now) / 1000)),
+                                    minRemainingSeconds: Math.max(0, Math.floor((minTime - now) / 1000)),
+                                    minSpawnTime: timer.minSpawnTime,
+                                    maxSpawnTime: timer.maxSpawnTime,
+                                    location: timer.npc.location,
+                                    addedByName: timer.member?.name || null
+                                };
+
+                                // Indeksuj po nazwie i lowercase dla szybkiego dostępu
+                                lootlogTimers[name] = timerData;
+                                lootlogTimers[name.toLowerCase()] = timerData;
+
+                                if (timer.npc.type === 'ELITE2') hasEliteAccess = true;
+                                else if (timer.npc.type === 'TITAN') hasTitanAccess = true;
+                            }
+                        });
+
+                        // Callback w requestIdleCallback aby nie blokować gry
+                        if (callback) {
+                            if (typeof requestIdleCallback === 'function') {
+                                requestIdleCallback(callback, { timeout: 500 });
+                            } else {
+                                callback();
+                            }
+                        }
+                    })
+                    .catch(apiError => {
+                        clearTimeout(timeoutId);
+                        // Próba 2: Fallback na cache jeśli API nie zadziała
+                        const parsedTimers = parseTimersFromLootlogStorage(currentWorld);
+                        Object.values(parsedTimers).forEach((timer) => {
+                            lootlogTimers[timer.name] = timer;
+                            lootlogTimers[timer.name.toLowerCase()] = timer;
+                            if (timer.type === 'ELITE2') hasEliteAccess = true;
+                            else if (timer.type === 'TITAN') hasTitanAccess = true;
+                        });
+
+                        if (Object.keys(lootlogTimers).length === 0) {
+                            const lootlogTimerDiv = document.querySelector('.elite-timer-wnd, [class*="ll-timer"]');
+                            if (lootlogTimerDiv) {
+                                const timerText = lootlogTimerDiv.textContent;
+                                const timerRegex = /\[E2?\]\s*([^\d]+?)(\d{2}:\d{2}:\d{2})/g;
+                                let match;
+                                while ((match = timerRegex.exec(timerText)) !== null) {
+                                    const name = match[1].trim();
+                                    const time = match[2];
+                                    const [hours, minutes, seconds] = time.split(':').map(Number);
+                                    lootlogTimers[name] = {
+                                        name: name,
+                                        remainingSeconds: hours * 3600 + minutes * 60 + seconds,
+                                        timeString: time
+                                    };
+                                }
+                            }
+                        }
+
+                        if (callback) {
+                            if (typeof requestIdleCallback === 'function') {
+                                requestIdleCallback(callback, { timeout: 500 });
+                            } else {
+                                callback();
+                            }
+                        }
+                    });
+            } catch (e) {
+                console.error('[iledoe2] fetch error:', e);
+                if (callback) callback();
             }
-            
-            const lootlogTimerDiv = document.querySelector('.elite-timer-wnd, [class*="ll-timer"]');
-            if (lootlogTimerDiv) {
-                const timerText = lootlogTimerDiv.textContent;
-                const timerRegex = /\[E2?\]\s*([^\d]+?)(\d{2}:\d{2}:\d{2})/g;
-                let match;
-                while ((match = timerRegex.exec(timerText)) !== null) {
-                    const name = match[1].trim();
-                    const time = match[2];
-                    const [hours, minutes, seconds] = time.split(':').map(Number);
-                    const totalSeconds = hours * 3600 + minutes * 60 + seconds;
-                    
-                    lootlogTimers[name] = {
-                        name: name,
-                        remainingSeconds: totalSeconds,
-                        timeString: time
-                    };
-                }
-                
-                if (Object.keys(lootlogTimers).length > 0) {
-                    return;
-                }
-            }
-        } catch (e) {
+        };
+
+        // Przenieś na requestIdleCallback żeby nie blokować gry
+        if (typeof requestIdleCallback === 'function') {
+            requestIdleCallback(doFetch, { timeout: 2000 });
+        } else {
+            setTimeout(doFetch, 0);
         }
     }
 
@@ -832,85 +889,134 @@
     }
 
     function checkMapChange(forceRefresh = false) {
-        const newMapName = getCurrentMapName();
-        
-        if (newMapName && (newMapName !== currentMapName || forceRefresh)) {
-            if (newMapName !== currentMapName) {
-                currentMapName = newMapName;
-                matherWarningShown = false;
-            }
+        const doCheck = () => {
+            const newMapName = getCurrentMapName();
             
-            const eliteData = ELITE_II_DATA[currentMapName];
-            const titanData = TITAN_DATA[currentMapName];
-            const npcData = eliteData || titanData;
-            const npcType = titanData ? 'TITAN' : 'ELITE2';
-            
-            if (npcData) {
-                const npcNames = npcData.split('/').map(n => n.trim());
-                let matherDetected = false;
+            if (newMapName && (newMapName !== currentMapName || forceRefresh)) {
+                if (newMapName !== currentMapName) {
+                    currentMapName = newMapName;
+                    matherWarningShown = false;
+                }
                 
-                npcNames.forEach((npcName, index) => {
-                    let lootlogTimer = null;
-                    if (lootlogTimers[npcName]) {
-                        lootlogTimer = lootlogTimers[npcName];
-                    } else {
-                        for (const key in lootlogTimers) {
-                            if (key.includes(npcName) || npcName.includes(key)) {
-                                lootlogTimer = lootlogTimers[key];
-                                break;
+                const eliteData = ELITE_II_DATA[currentMapName];
+                const titanData = TITAN_DATA[currentMapName];
+                const npcData = eliteData || titanData;
+                const npcType = titanData ? 'TITAN' : 'ELITE2';
+                
+                if (npcData) {
+                    const npcNames = npcData.split('/').map(n => n.trim());
+                    let matherDetected = false;
+                    
+                    npcNames.forEach((npcName, index) => {
+                        let lootlogTimer = null;
+                        const nameLower = npcName.toLowerCase();
+                        
+                        // Szybkie wyszukiwanie — najpierw exact match
+                        if (lootlogTimers[npcName]) {
+                            lootlogTimer = lootlogTimers[npcName];
+                        } else if (lootlogTimers[nameLower]) {
+                            lootlogTimer = lootlogTimers[nameLower];
+                        } else {
+                            // Tylko jeśli exact match nie zadziała — szukaj fuzzy
+                            // Ale przejrzyj tylko pierwszych 20 kluczy (ELITE2 zwykle <10)
+                            let count = 0;
+                            for (const key in lootlogTimers) {
+                                if (count++ > 20) break;
+                                const keyLower = key.toLowerCase();
+                                if (keyLower.includes(nameLower) || nameLower.includes(keyLower)) {
+                                    lootlogTimer = lootlogTimers[key];
+                                    break;
+                                }
                             }
                         }
-                    }
-                    
-                    if (lootlogTimer && lootlogTimer.addedByName && npcType === 'ELITE2') {
-                        if (lootlogTimer.addedByName.toLowerCase().includes('ilmather')) {
-                            matherDetected = true;
+                        
+                        if (lootlogTimer && lootlogTimer.addedByName && npcType === 'ELITE2') {
+                            if (lootlogTimer.addedByName.toLowerCase().includes('ilmather')) {
+                                matherDetected = true;
+                            }
                         }
-                    }
+                        
+                        showToast(npcName, lootlogTimer, index, npcType);
+                    });
                     
-                    showToast(npcName, lootlogTimer, index, npcType);
-                });
-                
-                if (matherDetected) {
-                    showMatherWarning();
+                    if (matherDetected) {
+                        showMatherWarning();
+                    }
+                } else {
+                    removeAllToasts();
                 }
-            } else {
-                removeAllToasts();
             }
+        };
+
+        // Wykonaj gdy gra nie rysuje
+        if (typeof requestIdleCallback === 'function') {
+            requestIdleCallback(doCheck, { timeout: 1000 });
+        } else {
+            doCheck();
         }
     }
 
     function setupNpcKillListener() {
         try {
+            // Storage event - gdy Lootlog sam zmienia coś lokalnie
             window.addEventListener('storage', function(e) {
-                if (e.key === null || isLootlogStorageKey(e.key)) {
-                    fetchLootlogTimers();
-                    setTimeout(() => {
-                        const mapName = getCurrentMapName();
-                        if (mapName && ELITE_II_DATA[mapName]) {
-                            checkMapChange(true);
-                        }
-                    }, 1000);
+                if (e.key === null || (e.key && e.key.startsWith('ll:'))) {
+                    setTimeout(function() {
+                        fetchLootlogTimers(function() {
+                            const mapName = getCurrentMapName();
+                            if (mapName && (ELITE_II_DATA[mapName] || TITAN_DATA[mapName])) {
+                                checkMapChange(true);
+                            }
+                        });
+                    }, 300);
                 }
             });
             
-            let lastCacheHash = '';
-            setInterval(() => {
-                try {
-                    const newHash = getLootlogStorageFingerprint();
-                    if (newHash && lastCacheHash && lastCacheHash !== newHash) {
-                        fetchLootlogTimers();
-                        setTimeout(() => {
-                            const mapName = getCurrentMapName();
-                            if (mapName && ELITE_II_DATA[mapName]) {
-                                checkMapChange(true);
-                            }
+            // Hook na koniec walki
+            if (window.Engine && window.Engine.battle && window.Engine.battle.updateData) {
+                const origUpdateData = window.Engine.battle.updateData;
+                window.Engine.battle.updateData = function(data, isRound) {
+                    const result = origUpdateData.call(this, data, isRound);
+                    
+                    if (data && data.endBattle && data.m) {
+                        setTimeout(function() {
+                            try {
+                                let defeatedName = null;
+                                const battleLog = data.m;
+                                
+                                for (let i = 0; i < battleLog.length; i++) {
+                                    const line = battleLog[i];
+                                    if (typeof line === 'string') {
+                                        if (line.indexOf('loser=') >= 0) {
+                                            const idx = line.indexOf('loser=');
+                                            const rest = line.substring(idx + 6);
+                                            const endIdx = rest.indexOf(';');
+                                            defeatedName = endIdx >= 0 ? rest.substring(0, endIdx) : rest;
+                                            break;
+                                        }
+                                    }
+                                }
+                                
+                                if (defeatedName) {
+                                    const currentMap = getCurrentMapName();
+                                    if (currentMap) {
+                                        const eliteData = ELITE_II_DATA[currentMap];
+                                        const titanData = TITAN_DATA[currentMap];
+                                        
+                                        if (eliteData || titanData) {
+                                            fetchLootlogTimers(function() {
+                                                checkMapChange(true);
+                                            });
+                                        }
+                                    }
+                                }
+                            } catch (err) {}
                         }, 500);
                     }
-                    lastCacheHash = newHash;
-                } catch (e) {
-                }
-            }, 10000);
+                    
+                    return result;
+                };
+            }
             
             if (window.Engine?.battle) {
                 const originalBattleEnd = window.Engine.battle.endBattle;
@@ -918,13 +1024,12 @@
                     window.Engine.battle.endBattle = function(...args) {
                         const result = originalBattleEnd.apply(this, args);
                         setTimeout(() => {
-                            fetchLootlogTimers();
-                            setTimeout(() => {
+                            fetchLootlogTimers(() => {
                                 const mapName = getCurrentMapName();
-                                if (mapName && ELITE_II_DATA[mapName]) {
+                                if (mapName && (ELITE_II_DATA[mapName] || TITAN_DATA[mapName])) {
                                     checkMapChange(true);
                                 }
-                            }, 1000);
+                            });
                         }, 2000);
                         return result;
                     };
@@ -934,89 +1039,17 @@
         }
     }
 
-    // Hook na koniec walki - detectowanie pokonanych ELITE/TITAN
-    function hookBattleEnd() {
-        try {
-            if (window.Engine && window.Engine.battle && window.Engine.battle.updateData) {
-                const origUpdate = window.Engine.battle.updateData;
-                window.Engine.battle.updateData = function(data, isRound) {
-                    const result = origUpdate.call(this, data, isRound);
-                    
-                    // Sprawdź czy walka się skończyła
-                    if (data && data.endBattle && data.m && Array.isArray(data.m)) {
-                        handleBattleEnd(data);
-                    }
-                    
-                    return result;
-                };
-            }
-        } catch (e) {}
-    }
-    
-    function handleBattleEnd(data) {
-        try {
-            let defeatedName = null;
-            for (let i = 0; i < data.m.length; i++) {
-                const line = data.m[i];
-                if (typeof line === 'string' && line.includes('loser=')) {
-                    const match = line.match(/loser=([^;]+)/);
-                    if (match) {
-                        defeatedName = match[1];
-                        break;
-                    }
-                }
-            }
-            
-            if (!defeatedName) return;
-            
-            const defeatedList = defeatedName.split(',').map(function(n) { return n.trim(); });
-            const currentMap = getCurrentMapName();
-            if (!currentMap) return;
-            
-            const eliteData = ELITE_II_DATA[currentMap];
-            const titanData = TITAN_DATA[currentMap];
-            let eliteDefeated = null;
-            let eliteType = null;
-            
-            if (eliteData) {
-                const eliteNames = eliteData.split('/').map(function(n) { return n.trim(); });
-                for (let i = 0; i < defeatedList.length; i++) {
-                    if (eliteNames.indexOf(defeatedList[i]) >= 0) {
-                        eliteDefeated = defeatedList[i];
-                        eliteType = 'ELITE2';
-                        break;
-                    }
-                }
-            }
-            
-            if (!eliteDefeated && titanData) {
-                const titanNames = titanData.split('/').map(function(n) { return n.trim(); });
-                for (let i = 0; i < defeatedList.length; i++) {
-                    if (titanNames.indexOf(defeatedList[i]) >= 0) {
-                        eliteDefeated = defeatedList[i];
-                        eliteType = 'TITAN';
-                        break;
-                    }
-                }
-            }
-            
-            if (eliteDefeated) {
-                setTimeout(function() {
-                    fetchLootlogTimers(function() {
-                        checkMapChange(true);
-                    });
-                }, 500);
-            }
-        } catch (e) {}
-    }
-
     function init() {
-        fetchLootlogTimers();
+        fetchLootlogTimers(() => checkMapChange(true));
         
-        setInterval(fetchLootlogTimers, 20000);
-        
-        hookBattleEnd();
-        checkMapChange();
+        setInterval(() => {
+            fetchLootlogTimers(() => {
+                const mapName = getCurrentMapName();
+                if (mapName && (ELITE_II_DATA[mapName] || TITAN_DATA[mapName])) {
+                    checkMapChange(true);
+                }
+            });
+        }, 20000);
         
         setInterval(checkMapChange, 2000);
         
@@ -1026,7 +1059,7 @@
                 if (typeof originalMapChange === 'function') {
                     window.Engine.map.change = function(...args) {
                         originalMapChange.apply(this, args);
-                        setTimeout(checkMapChange, 500);
+                        setTimeout(() => checkMapChange(true), 500);
                     };
                 }
             }
