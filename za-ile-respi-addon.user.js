@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Za ile respi Elita II & Tytan
 // @namespace    http://tampermonkey.net/
-// @version      1.5.6
+// @version      1.5.7
 // @description  Pokazuje timery elit II i tytanow z pelna integracja Lootlog
 // @author       Kruul
 // @match        https://*.margonem.pl/
@@ -218,18 +218,6 @@
         });
 
         return entries;
-    }
-
-    function getLootlogStorageFingerprint() {
-        try {
-            const entries = getLootlogStorageEntries();
-            if (!entries.length) return '';
-            return entries
-                .map(([key, value]) => `${key}:${value.length}:${value.slice(0, 120)}`)
-                .join('|');
-        } catch (e) {
-            return '';
-        }
     }
 
     function collectGuildTimerArrays(root, world) {
