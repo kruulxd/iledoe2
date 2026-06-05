@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Za ile respi Elita II & Tytan
 // @namespace    http://tampermonkey.net/
-// @version      1.6
+// @version      1.6.1
 // @description  Pokazuje timery elit II i tytanow z pelna integracja Lootlog
 // @author       Kruul
 // @match        https://*.margonem.pl/
@@ -904,7 +904,9 @@
             const newMapName = getCurrentMapName();
             
             if (newMapName && (newMapName !== currentMapName || forceRefresh)) {
+                // Wyczyść stare toasty przy zmianie mapy
                 if (newMapName !== currentMapName) {
+                    removeAllToasts();
                     currentMapName = newMapName;
                     matherWarningShown = false;
                 }
