@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Za ile respi Elita II & Tytan
 // @namespace    http://tampermonkey.net/
-// @version      1.6.1
+// @version      1.6.2
 // @description  Pokazuje timery elit II i tytanow z pelna integracja Lootlog
 // @author       Kruul
 // @match        https://*.margonem.pl/
@@ -619,21 +619,24 @@
             let labelText = 'respi za';
             let labelColor = '#fff';
             let nameColor = isTitan ? '#ff3333' : '#ff6b9d';
+            let displaySeconds = totalSeconds; // Co wyświetlać w timerze
             
             if (isTitan) {
                 // Titan: sprawdzaj czy jesteśmy w cooldown czy w oknie respu
                 if (minSeconds > 0) {
-                    // Cooldown - czeka na otwarcie okna respu
+                    // Cooldown - czeka na otwarcie okna respu (wyświetl czas do minimum)
                     timerColor = '#fff';
                     labelText = 'zaczyna respa za';
                     labelColor = '#fff';
                     nameColor = '#ff3333';
+                    displaySeconds = minSeconds; // Wyświetl czas do okna respu
                 } else {
-                    // W oknie respu - może się pojawić
+                    // W oknie respu - może się pojawić (wyświetl czas do maximum)
                     timerColor = '#ffa500';
                     labelText = 'respi jeszcze przez';
                     labelColor = '#ffa500';
                     nameColor = '#ff3333';
+                    displaySeconds = totalSeconds; // Wyświetl czas do końca okna
                 }
             }
             
@@ -642,7 +645,7 @@
                     <span style="color: ${nameColor}; font-weight: bold;">${eliteName}</span>
                     <span style="color: #aaa;">-</span>
                     <span style="color: ${labelColor};">${labelText}</span>
-                    <span id="${timerElementId}" style="color: ${timerColor}; font-weight: bold;">${formatTime(totalSeconds)}</span>
+                    <span id="${timerElementId}" style="color: ${timerColor}; font-weight: bold;">${formatTime(displaySeconds)}</span>
                 </div>
             `;
         } else {
@@ -707,24 +710,27 @@
                 minRemainingSeconds--;
                 
                 if (remainingSeconds > 0 && timerElement) {
-                    timerElement.textContent = formatTime(remainingSeconds);
-                    
                     if (isTitan) {
                         // Przełączaj kolory i tekst dla TITAN w zależności od okresu
                         const allSpans = toast.querySelectorAll('span');
                         const labelSpan = allSpans[2]; // label text span
                         
                         if (minRemainingSeconds > 0) {
-                            // Cooldown - białe kolory
+                            // Cooldown - białe kolory, wyświetl czas do okna respu (minRemainingSeconds)
                             timerElement.style.color = '#fff';
                             labelSpan.style.color = '#fff';
                             labelSpan.textContent = 'zaczyna respa za';
+                            timerElement.textContent = formatTime(minRemainingSeconds);
                         } else {
-                            // Okno respu - pomarańczowe kolory
+                            // Okno respu - pomarańczowe kolory, wyświetl czas do końca (remainingSeconds)
                             timerElement.style.color = '#ffa500';
                             labelSpan.style.color = '#ffa500';
                             labelSpan.textContent = 'respi jeszcze przez';
+                            timerElement.textContent = formatTime(remainingSeconds);
                         }
+                    } else {
+                        // ELITE2 - zwykły countdown
+                        timerElement.textContent = formatTime(remainingSeconds);
                     }
                 } else if (remainingSeconds <= 0) {
                     clearInterval(interval);
