@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Za ile respi Elita II & Tytan
 // @namespace    http://tampermonkey.net/
-// @version      1.6.3
+// @version      1.7.0
 // @description  Pokazuje timery elit II i tytanow z pelna integracja Lootlog
 // @author       Kruul
 // @match        https://*.margonem.pl/
@@ -640,12 +640,17 @@
                 }
             }
             
+            const addedByName = lootlogTimer.addedByName ? ` • ${lootlogTimer.addedByName}` : '';
+            
             toast.innerHTML = `
-                <div style="display: flex; align-items: center; gap: 8px;">
-                    <span style="color: ${nameColor}; font-weight: bold;">${eliteName}</span>
-                    <span style="color: #aaa;">-</span>
-                    <span style="color: ${labelColor};">${labelText}</span>
-                    <span id="${timerElementId}" style="color: ${timerColor}; font-weight: bold;">${formatTime(displaySeconds)}</span>
+                <div style="display: flex; flex-direction: column; gap: 4px;">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <span style="color: ${nameColor}; font-weight: bold;">${eliteName}</span>
+                        <span style="color: #aaa;">-</span>
+                        <span style="color: ${labelColor};">${labelText}</span>
+                        <span id="${timerElementId}" style="color: ${timerColor}; font-weight: bold;">${formatTime(displaySeconds)}</span>
+                    </div>
+                    ${addedByName ? `<div style="text-align: center; font-size: 0.75em; color: #888;">Dodane przez: ${addedByName}</div>` : ''}
                 </div>
             `;
         } else {
@@ -662,10 +667,12 @@
             }
             
             toast.innerHTML = `
-                <div style="display: flex; align-items: center; gap: 8px;">
-                    <span style="color: ${nameColor}; font-weight: bold;">${eliteName}</span>
-                    <span style="color: #aaa;">-</span>
-                    <span style="color: ${messageColor};">${noTimerMessage}</span>
+                <div style="display: flex; flex-direction: column; gap: 4px;">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <span style="color: ${nameColor}; font-weight: bold;">${eliteName}</span>
+                        <span style="color: #aaa;">-</span>
+                        <span style="color: ${messageColor};">${noTimerMessage}</span>
+                    </div>
                 </div>
             `;
         }
@@ -735,11 +742,15 @@
                 } else if (remainingSeconds <= 0) {
                     clearInterval(interval);
                     const nameColor = isTitan ? '#ff3333' : '#ff6b9d';
+                    const addedByName = lootlogTimer.addedByName ? ` • ${lootlogTimer.addedByName}` : '';
                     toast.innerHTML = `
-                        <div style="display: flex; align-items: center; gap: 8px;">
-                            <span style="color: ${nameColor}; font-weight: bold;">${eliteName}</span>
-                            <span style="color: #aaa;">-</span>
-                            <span style="color: #00ff88; font-weight: bold;">zrespił/a</span>
+                        <div style="display: flex; flex-direction: column; gap: 4px;">
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                                <span style="color: ${nameColor}; font-weight: bold;">${eliteName}</span>
+                                <span style="color: #aaa;">-</span>
+                                <span style="color: #00ff88; font-weight: bold;">zrespił/a</span>
+                            </div>
+                            ${addedByName ? `<div style="text-align: center; font-size: 0.75em; color: #888;">Dodane przez: ${addedByName}</div>` : ''}
                         </div>
                     `;
                 }
