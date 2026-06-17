@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Za ile respi Elita II & Tytan
 // @namespace    http://tampermonkey.net/
-// @version      1.7.2
+// @version      1.7.3
 // @description  Pokazuje timery elit II i tytanow z pelna integracja Lootlog
 // @author       Kruul
 // @match        https://*.margonem.pl/
@@ -516,57 +516,53 @@
     }
 
     function getPositionStyle(index = 0) {
-        const spacing = 120; // Zwiększyć spacing bo toasty z dodatkową linią są większe
+        const spacing = 35;
         const offset = 10;
         const bounds = getGameCanvasBounds();
         
-        // Zamiast używać index - policz ile toastów już jest wyświetlonych
-        const existingToasts = document.querySelectorAll('.elite-toast').length;
-        const stackIndex = existingToasts; // Nowy toast będzie najniżej
-        
         const positions = {
             'top-left': {
-                top: `${bounds.top + offset + (stackIndex * spacing)}px`,
+                top: `${bounds.top + offset + (index * spacing)}px`,
                 left: `${bounds.left + offset}px`,
                 transform: 'none'
             },
             'top-center': {
-                top: `${bounds.top + offset + (stackIndex * spacing)}px`,
+                top: `${bounds.top + offset + (index * spacing)}px`,
                 left: `${bounds.left + bounds.width / 2}px`,
                 transform: 'translateX(-50%)'
             },
             'top-right': {
-                top: `${bounds.top + offset + (stackIndex * spacing)}px`,
+                top: `${bounds.top + offset + (index * spacing)}px`,
                 left: `${bounds.left + bounds.width - offset}px`,
                 transform: 'translateX(-100%)'
             },
             'middle-left': {
-                top: `${bounds.top + bounds.height / 2 + (stackIndex * spacing)}px`,
+                top: `${bounds.top + bounds.height / 2 + (index * spacing)}px`,
                 left: `${bounds.left + offset}px`,
                 transform: 'translateY(-50%)'
             },
             'middle-center': {
-                top: `${bounds.top + bounds.height / 2 + (stackIndex * spacing)}px`,
+                top: `${bounds.top + bounds.height / 2 + (index * spacing)}px`,
                 left: `${bounds.left + bounds.width / 2}px`,
                 transform: 'translate(-50%, -50%)'
             },
             'middle-right': {
-                top: `${bounds.top + bounds.height / 2 + (stackIndex * spacing)}px`,
+                top: `${bounds.top + bounds.height / 2 + (index * spacing)}px`,
                 left: `${bounds.left + bounds.width - offset}px`,
                 transform: 'translate(-100%, -50%)'
             },
             'bottom-left': {
-                top: `${bounds.top + bounds.height - offset - (stackIndex * spacing) - 30}px`,
+                top: `${bounds.top + bounds.height - offset - (index * spacing) - 30}px`,
                 left: `${bounds.left + offset}px`,
                 transform: 'none'
             },
             'bottom-center': {
-                top: `${bounds.top + bounds.height - offset - (stackIndex * spacing) - 30}px`,
+                top: `${bounds.top + bounds.height - offset - (index * spacing) - 30}px`,
                 left: `${bounds.left + bounds.width / 2}px`,
                 transform: 'translateX(-50%)'
             },
             'bottom-right': {
-                top: `${bounds.top + bounds.height - offset - (stackIndex * spacing) - 30}px`,
+                top: `${bounds.top + bounds.height - offset - (index * spacing) - 30}px`,
                 left: `${bounds.left + bounds.width - offset}px`,
                 transform: 'translateX(-100%)'
             }
@@ -644,17 +640,12 @@
                 }
             }
             
-            const addedByName = lootlogTimer.addedByName ? ` • ${lootlogTimer.addedByName}` : '';
-            
             toast.innerHTML = `
-                <div style="display: flex; flex-direction: column; gap: 4px;">
-                    <div style="display: flex; align-items: center; gap: 8px;">
-                        <span style="color: ${nameColor}; font-weight: bold;">${eliteName}</span>
-                        <span style="color: #aaa;">-</span>
-                        <span style="color: ${labelColor};">${labelText}</span>
-                        <span id="${timerElementId}" style="color: ${timerColor}; font-weight: bold;">${formatTime(displaySeconds)}</span>
-                    </div>
-                    ${addedByName ? `<div style="text-align: center; font-size: 0.75em; color: #888;">Dodane przez: ${addedByName}</div>` : ''}
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span style="color: ${nameColor}; font-weight: bold;">${eliteName}</span>
+                    <span style="color: #aaa;">-</span>
+                    <span style="color: ${labelColor};">${labelText}</span>
+                    <span id="${timerElementId}" style="color: ${timerColor}; font-weight: bold;">${formatTime(displaySeconds)}</span>
                 </div>
             `;
         } else {
@@ -671,12 +662,10 @@
             }
             
             toast.innerHTML = `
-                <div style="display: flex; flex-direction: column; gap: 4px;">
-                    <div style="display: flex; align-items: center; gap: 8px;">
-                        <span style="color: ${nameColor}; font-weight: bold;">${eliteName}</span>
-                        <span style="color: #aaa;">-</span>
-                        <span style="color: ${messageColor};">${noTimerMessage}</span>
-                    </div>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span style="color: ${nameColor}; font-weight: bold;">${eliteName}</span>
+                    <span style="color: #aaa;">-</span>
+                    <span style="color: ${messageColor};">${noTimerMessage}</span>
                 </div>
             `;
         }
@@ -746,15 +735,11 @@
                 } else if (remainingSeconds <= 0) {
                     clearInterval(interval);
                     const nameColor = isTitan ? '#ff3333' : '#ff6b9d';
-                    const addedByName = lootlogTimer.addedByName ? ` • ${lootlogTimer.addedByName}` : '';
                     toast.innerHTML = `
-                        <div style="display: flex; flex-direction: column; gap: 4px;">
-                            <div style="display: flex; align-items: center; gap: 8px;">
-                                <span style="color: ${nameColor}; font-weight: bold;">${eliteName}</span>
-                                <span style="color: #aaa;">-</span>
-                                <span style="color: #00ff88; font-weight: bold;">zrespił/a</span>
-                            </div>
-                            ${addedByName ? `<div style="text-align: center; font-size: 0.75em; color: #888;">Dodane przez: ${addedByName}</div>` : ''}
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <span style="color: ${nameColor}; font-weight: bold;">${eliteName}</span>
+                            <span style="color: #aaa;">-</span>
+                            <span style="color: #00ff88; font-weight: bold;">zrespił/a</span>
                         </div>
                     `;
                 }
