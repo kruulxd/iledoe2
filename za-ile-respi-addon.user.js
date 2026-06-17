@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Za ile respi Elita II & Tytan
 // @namespace    http://tampermonkey.net/
-// @version      1.7.0
+// @version      1.7.1
 // @description  Pokazuje timery elit II i tytanow z pelna integracja Lootlog
 // @author       Kruul
 // @match        https://*.margonem.pl/
@@ -516,53 +516,57 @@
     }
 
     function getPositionStyle(index = 0) {
-        const spacing = 35;
+        const spacing = 120; // Zwiększyć spacing bo toasty z dodatkową linią są większe
         const offset = 10;
         const bounds = getGameCanvasBounds();
         
+        // Zamiast używać index - policz ile toastów już jest wyświetlonych
+        const existingToasts = document.querySelectorAll('.elite-toast').length;
+        const stackIndex = existingToasts; // Nowy toast będzie najniżej
+        
         const positions = {
             'top-left': {
-                top: `${bounds.top + offset + (index * spacing)}px`,
+                top: `${bounds.top + offset + (stackIndex * spacing)}px`,
                 left: `${bounds.left + offset}px`,
                 transform: 'none'
             },
             'top-center': {
-                top: `${bounds.top + offset + (index * spacing)}px`,
+                top: `${bounds.top + offset + (stackIndex * spacing)}px`,
                 left: `${bounds.left + bounds.width / 2}px`,
                 transform: 'translateX(-50%)'
             },
             'top-right': {
-                top: `${bounds.top + offset + (index * spacing)}px`,
+                top: `${bounds.top + offset + (stackIndex * spacing)}px`,
                 left: `${bounds.left + bounds.width - offset}px`,
                 transform: 'translateX(-100%)'
             },
             'middle-left': {
-                top: `${bounds.top + bounds.height / 2 + (index * spacing)}px`,
+                top: `${bounds.top + bounds.height / 2 + (stackIndex * spacing)}px`,
                 left: `${bounds.left + offset}px`,
                 transform: 'translateY(-50%)'
             },
             'middle-center': {
-                top: `${bounds.top + bounds.height / 2 + (index * spacing)}px`,
+                top: `${bounds.top + bounds.height / 2 + (stackIndex * spacing)}px`,
                 left: `${bounds.left + bounds.width / 2}px`,
                 transform: 'translate(-50%, -50%)'
             },
             'middle-right': {
-                top: `${bounds.top + bounds.height / 2 + (index * spacing)}px`,
+                top: `${bounds.top + bounds.height / 2 + (stackIndex * spacing)}px`,
                 left: `${bounds.left + bounds.width - offset}px`,
                 transform: 'translate(-100%, -50%)'
             },
             'bottom-left': {
-                top: `${bounds.top + bounds.height - offset - (index * spacing) - 30}px`,
+                top: `${bounds.top + bounds.height - offset - (stackIndex * spacing) - 30}px`,
                 left: `${bounds.left + offset}px`,
                 transform: 'none'
             },
             'bottom-center': {
-                top: `${bounds.top + bounds.height - offset - (index * spacing) - 30}px`,
+                top: `${bounds.top + bounds.height - offset - (stackIndex * spacing) - 30}px`,
                 left: `${bounds.left + bounds.width / 2}px`,
                 transform: 'translateX(-50%)'
             },
             'bottom-right': {
-                top: `${bounds.top + bounds.height - offset - (index * spacing) - 30}px`,
+                top: `${bounds.top + bounds.height - offset - (stackIndex * spacing) - 30}px`,
                 left: `${bounds.left + bounds.width - offset}px`,
                 transform: 'translateX(-100%)'
             }
