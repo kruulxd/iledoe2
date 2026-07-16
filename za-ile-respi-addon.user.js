@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Za ile respi Elita II & Tytan
 // @namespace    http://tampermonkey.net/
-// @version      1.7.5
+// @version      1.7.6
 // @description  Pokazuje timery elit II i tytanow z pelna integracja Lootlog
 // @author       Kruul
 // @match        https://*.margonem.pl/
@@ -53,7 +53,7 @@
         'Skalne Cmentarzysko p.4': 'Łowca czaszek',
         'Piramida Pustynnego Władcy p.3': 'Ozirus Władca Hieroglifów',
         'Jama Morskiej Macki p.1 - sala 3': 'Morski potwór',
-        'Opuszczony statek - pokład': 'Krab pustelnik (pokład)',
+        'Opuszczony statek - pokład': 'Krab pustelnik (statek)',
         'Wyspa Rem': 'Krab pustelnik (wyspa)',
         'Twierdza Rogogłowych - Sala Byka': 'Borgoros Garamir III',
         'Piaskowa Pułapka - Grota Piaskowej Śmierci': 'Stworzyciel',
