@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Za ile respi Elita II & Tytan
 // @namespace    http://tampermonkey.net/
-// @version      1.7.6
+// @version      1.7.7
 // @description  Pokazuje timery elit II i tytanow z pelna integracja Lootlog
 // @author       Kruul
 // @match        https://*.margonem.pl/
@@ -327,6 +327,19 @@
         };
     }
 
+    // Ten sam boss moze przyjsc kilka razy (rozne gildie konta, stary cache).
+    // Wygrywa najswiezsze zabicie, a nie kolejnosc w odpowiedzi API.
+    function isFresher(candidate, existing) {
+        if (!existing) return true;
+        return (toTimestamp(candidate.maxSpawnTime) || 0) > (toTimestamp(existing.maxSpawnTime) || 0);
+    }
+
+    function putTimer(timerData) {
+        if (!isFresher(timerData, lootlogTimers[timerData.name])) return;
+        lootlogTimers[timerData.name] = timerData;
+        lootlogTimers[timerData.name.toLowerCase()] = timerData;
+    }
+
     function parseTimersFromLootlogStorage(world) {
         const now = Date.now();
         const parsedTimers = {};
@@ -353,8 +366,7 @@
                         const normalized = normalizeTimerEntry(timer, now);
                         if (!normalized) return;
 
-                        const existing = parsedTimers[normalized.name];
-                        if (!existing || normalized.remainingSeconds < existing.remainingSeconds) {
+                        if (isFresher(normalized, parsedTimers[normalized.name])) {
                             parsedTimers[normalized.name] = normalized;
                         }
                     });
@@ -411,9 +423,7 @@
                                     addedByName: timer.member?.name || null
                                 };
 
-                                // Indeksuj po nazwie i lowercase dla szybkiego dostępu
-                                lootlogTimers[name] = timerData;
-                                lootlogTimers[name.toLowerCase()] = timerData;
+                                putTimer(timerData);
 
                                 if (timer.npc.type === 'ELITE2') hasEliteAccess = true;
                                 else if (timer.npc.type === 'TITAN') hasTitanAccess = true;
@@ -434,8 +444,7 @@
                         // Próba 2: Fallback na cache jeśli API nie zadziała
                         const parsedTimers = parseTimersFromLootlogStorage(currentWorld);
                         Object.values(parsedTimers).forEach((timer) => {
-                            lootlogTimers[timer.name] = timer;
-                            lootlogTimers[timer.name.toLowerCase()] = timer;
+                            putTimer(timer);
                             if (timer.type === 'ELITE2') hasEliteAccess = true;
                             else if (timer.type === 'TITAN') hasTitanAccess = true;
                         });
@@ -941,11 +950,9 @@
                         } else if (lootlogTimers[nameLower]) {
                             lootlogTimer = lootlogTimers[nameLower];
                         } else {
-                            // Tylko jeśli exact match nie zadziała — szukaj fuzzy
-                            // Ale przejrzyj tylko pierwszych 20 kluczy (ELITE2 zwykle <10)
-                            let count = 0;
+                            // Bez limitu kluczy: lista timerow zalezy od gildii postaci,
+                            // limit 20 gubil bossy, ktore wypadly dalej w odpowiedzi
                             for (const key in lootlogTimers) {
-                                if (count++ > 20) break;
                                 const keyLower = key.toLowerCase();
                                 if (keyLower.includes(nameLower) || nameLower.includes(keyLower)) {
                                     lootlogTimer = lootlogTimers[key];
