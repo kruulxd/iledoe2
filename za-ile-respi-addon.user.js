@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Za ile respi Elita II & Tytan
 // @namespace    http://tampermonkey.net/
-// @version      1.7.7
+// @version      1.7.8
 // @description  Pokazuje timery elit II i tytanow z pelna integracja Lootlog
 // @author       Kruul
 // @match        https://*.margonem.pl/
@@ -136,7 +136,7 @@
     let currentWorld = 'arkantes';
     let hasEliteAccess = false;
     let hasTitanAccess = false;
-    let toastPosition = localStorage.getItem('eliteToastPosition') || 'bottom-center';
+    let toastPosition = localStorage.getItem('eliteToastPosition') || 'top-center';
     let matherWarningShown = false;
 
     function getWorld() {
@@ -529,262 +529,238 @@
         return { top: 0, left: 0, width: window.innerWidth, height: window.innerHeight };
     }
 
-    function getPositionStyle(index = 0) {
-        const spacing = 35;
-        const offset = 10;
-        const bounds = getGameCanvasBounds();
-        
-        const positions = {
-            'top-left': {
-                top: `${bounds.top + offset + (index * spacing)}px`,
-                left: `${bounds.left + offset}px`,
-                transform: 'none'
-            },
-            'top-center': {
-                top: `${bounds.top + offset + (index * spacing)}px`,
-                left: `${bounds.left + bounds.width / 2}px`,
-                transform: 'translateX(-50%)'
-            },
-            'top-right': {
-                top: `${bounds.top + offset + (index * spacing)}px`,
-                left: `${bounds.left + bounds.width - offset}px`,
-                transform: 'translateX(-100%)'
-            },
-            'middle-left': {
-                top: `${bounds.top + bounds.height / 2 + (index * spacing)}px`,
-                left: `${bounds.left + offset}px`,
-                transform: 'translateY(-50%)'
-            },
-            'middle-center': {
-                top: `${bounds.top + bounds.height / 2 + (index * spacing)}px`,
-                left: `${bounds.left + bounds.width / 2}px`,
-                transform: 'translate(-50%, -50%)'
-            },
-            'middle-right': {
-                top: `${bounds.top + bounds.height / 2 + (index * spacing)}px`,
-                left: `${bounds.left + bounds.width - offset}px`,
-                transform: 'translate(-100%, -50%)'
-            },
-            'bottom-left': {
-                top: `${bounds.top + bounds.height - offset - (index * spacing) - 30}px`,
-                left: `${bounds.left + offset}px`,
-                transform: 'none'
-            },
-            'bottom-center': {
-                top: `${bounds.top + bounds.height - offset - (index * spacing) - 30}px`,
-                left: `${bounds.left + bounds.width / 2}px`,
-                transform: 'translateX(-50%)'
-            },
-            'bottom-right': {
-                top: `${bounds.top + bounds.height - offset - (index * spacing) - 30}px`,
-                left: `${bounds.left + bounds.width - offset}px`,
-                transform: 'translateX(-100%)'
-            }
-        };
-        return positions[toastPosition] || positions['bottom-center'];
+    // Kontener zakotwiczony w punkcie canvasa; translate wyrownuje go do tego punktu,
+    // wiec niezaleznie od liczby bossow nie wychodzi poza mape
+    function getToastContainer() {
+        let box = document.getElementById('elite-toasts');
+        if (!box) {
+            box = document.createElement('div');
+            box.id = 'elite-toasts';
+            document.body.appendChild(box);
+        }
+        const [v, h] = toastPosition.split('-');
+        const b = getGameCanvasBounds();
+        const o = 10;
+        box.style.top = `${v === 'top' ? b.top + o : v === 'middle' ? b.top + b.height / 2 : b.top + b.height - o}px`;
+        box.style.left = `${h === 'left' ? b.left + o : h === 'center' ? b.left + b.width / 2 : b.left + b.width - o}px`;
+        box.style.transform = `translate(${h === 'left' ? 0 : h === 'center' ? -50 : -100}%, ${v === 'top' ? 0 : v === 'middle' ? -50 : -100}%)`;
+        // Na srodku poziomo rzad, przy bokach kolumna - zeby nie wjezdzac w mape
+        box.style.flexDirection = h === 'center' ? 'row' : 'column';
+        box.style.alignItems = h === 'left' ? 'flex-start' : h === 'center' ? 'center' : 'flex-end';
+        return box;
     }
 
-    function showToast(eliteName, lootlogTimer = null, index = 0, npcType = 'ELITE2') {
-        const safeEliteName = eliteName.replace(/[^a-zA-Z0-9]/g, '-');
-        const toastId = `elite-toast-${safeEliteName}`;
-        
-        const existingToast = document.getElementById(toastId);
-        const isNewToast = !existingToast;
-        
-        if (existingToast) {
-            existingToast.remove();
+    const UI = {
+        e2: '#ff7aa8',
+        titan: '#ff4d4d',
+        ready: '#6dffa8',
+        wait: '#e6e6e6',
+        window: '#ffb347',
+        muted: '#8a8a8a'
+    };
+
+    // Jeden arkusz zamiast inline stylow na kazdym tostcie i przycisku
+    function ensureStyles() {
+        if (document.getElementById('elite-toast-style')) return;
+        const style = document.createElement('style');
+        style.id = 'elite-toast-style';
+        style.textContent = `
+            #elite-toasts {
+                position: fixed;
+                z-index: 99999;
+                display: flex;
+                gap: 4px;
+            }
+            .elite-toast {
+                display: flex;
+                align-items: center;
+                gap: 6px;
+                max-width: 260px;
+                padding: 3px 9px 3px 7px;
+                border-radius: 999px;
+                background: rgba(12, 12, 16, 0.62);
+                border: 1px solid rgba(255, 255, 255, 0.08);
+                color: #e6e6e6;
+                font: 11px/1.4 Arial, sans-serif;
+                cursor: pointer;
+                user-select: none;
+                white-space: nowrap;
+                position: relative;
+                overflow: hidden;
+                transition: opacity 0.3s;
+            }
+            .elite-toast.et-enter { animation: eliteFadeIn 0.2s ease-out; }
+            .elite-toast:hover { background: rgba(12, 12, 16, 0.85); opacity: 1; }
+            .elite-toast .et-dot { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+            .elite-toast .et-name { overflow: hidden; text-overflow: ellipsis; opacity: 0.9; }
+            .elite-toast .et-time { font-weight: bold; font-variant-numeric: tabular-nums; flex: none; }
+            /* Pasek postepu przy dolnej krawedzi pigulki */
+            .elite-toast::after {
+                content: '';
+                position: absolute;
+                left: 0;
+                bottom: 0;
+                height: 2px;
+                width: calc(var(--p, 0) * 100%);
+                background: var(--c, transparent);
+                transition: width 1s linear;
+            }
+            /* Daleko do respa albo brak timera: sama kropka i czas, nazwa po najechaniu */
+            .elite-toast[data-phase="far"], .elite-toast[data-phase="none"] { opacity: 0.65; }
+            .elite-toast[data-phase="far"]:not(:hover) .et-name,
+            .elite-toast[data-phase="none"]:not(:hover) .et-name { display: none; }
+            .elite-toast[data-phase="soon"] { animation: etPulse 1s ease-in-out infinite alternate; }
+            .elite-toast[data-phase="ready"] { border-color: ${UI.ready}; }
+            .elite-toast.et-flash { animation: etFlash 0.5s ease-in-out 3; }
+            #elite-position-settings-btn {
+                position: fixed;
+                z-index: 99998;
+                width: 18px;
+                height: 18px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                border-radius: 50%;
+                background: rgba(12, 12, 16, 0.6);
+                font-size: 10px;
+                cursor: pointer;
+                opacity: 0.35;
+                transition: opacity 0.15s;
+            }
+            #elite-position-settings-btn:hover { opacity: 1; }
+            #elite-position-panel {
+                position: fixed;
+                z-index: 100000;
+                transform: translate(-100%, -100%);
+                padding: 6px;
+                border-radius: 8px;
+                background: rgba(12, 12, 16, 0.9);
+                border: 1px solid rgba(255, 255, 255, 0.1);
+                display: grid;
+                grid-template-columns: repeat(3, 20px);
+                gap: 3px;
+            }
+            #elite-position-panel button {
+                width: 20px;
+                height: 20px;
+                padding: 0;
+                border-radius: 4px;
+                border: 1px solid rgba(255, 255, 255, 0.12);
+                background: transparent;
+                cursor: pointer;
+            }
+            #elite-position-panel button:hover { background: rgba(255, 122, 168, 0.25); }
+            #elite-position-panel button.active { background: ${UI.e2}; border-color: ${UI.e2}; }
+            @keyframes eliteFadeIn { from { opacity: 0; } to { opacity: 1; } }
+            @keyframes etPulse { to { box-shadow: 0 0 8px 1px var(--c); } }
+            @keyframes etFlash { 50% { background: rgba(109, 255, 168, 0.35); } }
+            @keyframes fadeOut { from { opacity: 1; } to { opacity: 0; } }
+        `;
+        document.head.appendChild(style);
+    }
+
+    // Pasek liczy tylko ostatnie 10 min: Lootlog nie podaje czasu zabicia,
+    // wiec pelnej dlugosci odliczania nie znamy. ponytail: stala zamiast ustawienia
+    const PROGRESS_HORIZON = 600;
+    const FAR_SECONDS = 120;
+    const SOON_SECONDS = 60;
+
+    // Stan licznika -> tekst, kolor, faza i postep paska. Etykiety sa w title,
+    // zeby pigulka miescila tylko nazwe i czas.
+    function timerState(isTitan, remaining, minRemaining, windowSeconds) {
+        if (remaining <= 0) return { text: 'jest', color: UI.ready, title: 'zrespił/a', phase: 'ready', p: 1 };
+        if (isTitan && minRemaining <= 0) {
+            return {
+                text: '≤ ' + formatTime(remaining),
+                color: UI.window,
+                title: 'może respić - okno zamyka się za',
+                phase: 'window',
+                p: Math.min(1, Math.max(0, 1 - remaining / windowSeconds))
+            };
         }
+        const left = isTitan ? minRemaining : remaining;
+        return {
+            text: formatTime(left),
+            color: UI.wait,
+            title: isTitan ? 'okno respa otworzy się za' : 'respi za',
+            phase: left > FAR_SECONDS ? 'far' : left > SOON_SECONDS ? 'near' : 'soon',
+            p: Math.min(1, Math.max(0, 1 - left / PROGRESS_HORIZON))
+        };
+    }
+
+    function showToast(eliteName, lootlogTimer = null, npcType = 'ELITE2') {
+        const toastId = `elite-toast-${eliteName.replace(/[^a-zA-Z0-9]/g, '-')}`;
+        const existingToast = document.getElementById(toastId);
+        if (existingToast) existingToast.remove();
+
+        const hasLootlogTimer = lootlogTimer && lootlogTimer.remainingSeconds !== undefined;
+        const isTitan = hasLootlogTimer ? lootlogTimer.type === 'TITAN' : npcType === 'TITAN';
 
         const toast = document.createElement('div');
         toast.id = toastId;
         toast.className = 'elite-toast';
-        
-        const hasLootlogTimer = lootlogTimer && lootlogTimer.remainingSeconds !== undefined;
-        const isTitan = lootlogTimer && lootlogTimer.type === 'TITAN';
-        
-        const posStyle = getPositionStyle(index);
-        
-        toast.style.cssText = `
-            position: fixed;
-            top: ${posStyle.top};
-            left: ${posStyle.left};
-            transform: ${posStyle.transform};
-            background: rgba(20, 20, 20, 0.75);
-            color: #fff;
-            padding: 8px 15px;
-            border-radius: 8px;
-            font-family: Arial, sans-serif;
-            font-size: 13px;
-            font-weight: normal;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-            z-index: 99999;
-            ${isNewToast ? 'animation: slideIn 0.3s ease-out;' : ''}
-            backdrop-filter: blur(5px);
-            pointer-events: auto;
-        `;
-        
-        const timerElementId = `timer-${safeEliteName}`;
-        
+        // Wejscie animowane tylko przy pierwszym pokazaniu, nie przy odswiezeniu co 20 s
+        if (!existingToast) toast.classList.add('et-enter');
+
+        const dot = document.createElement('span');
+        dot.className = 'et-dot';
+        dot.style.background = isTitan ? UI.titan : UI.e2;
+        const name = document.createElement('span');
+        name.className = 'et-name';
+        name.textContent = eliteName;
+        const time = document.createElement('span');
+        time.className = 'et-time';
+        toast.append(dot, name, time);
+
+        const paint = (state) => {
+            time.textContent = state.text;
+            time.style.color = state.color;
+            toast.title = `${eliteName} - ${state.title} (kliknij, aby ukryć)`;
+            toast.dataset.phase = state.phase;
+            toast.style.setProperty('--p', state.p);
+            toast.style.setProperty('--c', state.color === UI.wait ? (isTitan ? UI.titan : UI.e2) : state.color);
+        };
+
+        let interval = null;
         if (hasLootlogTimer) {
-            const totalSeconds = lootlogTimer.remainingSeconds;
-            const minSeconds = lootlogTimer.minRemainingSeconds || 0;
-            
-            let timerColor = '#00ff88';
-            let labelText = 'respi za';
-            let labelColor = '#fff';
-            let nameColor = isTitan ? '#ff3333' : '#ff6b9d';
-            let displaySeconds = totalSeconds; // Co wyświetlać w timerze
-            
-            if (isTitan) {
-                // Titan: sprawdzaj czy jesteśmy w cooldown czy w oknie respu
-                if (minSeconds > 0) {
-                    // Cooldown - czeka na otwarcie okna respu (wyświetl czas do minimum)
-                    timerColor = '#fff';
-                    labelText = 'zaczyna respa za';
-                    labelColor = '#fff';
-                    nameColor = '#ff3333';
-                    displaySeconds = minSeconds; // Wyświetl czas do okna respu
-                } else {
-                    // W oknie respu - może się pojawić (wyświetl czas do maximum)
-                    timerColor = '#ffa500';
-                    labelText = 'respi jeszcze przez';
-                    labelColor = '#ffa500';
-                    nameColor = '#ff3333';
-                    displaySeconds = totalSeconds; // Wyświetl czas do końca okna
-                }
-            }
-            
-            toast.innerHTML = `
-                <div style="display: flex; align-items: center; gap: 8px;">
-                    <span style="color: ${nameColor}; font-weight: bold;">${eliteName}</span>
-                    <span style="color: #aaa;">-</span>
-                    <span style="color: ${labelColor};">${labelText}</span>
-                    <span id="${timerElementId}" style="color: ${timerColor}; font-weight: bold;">${formatTime(displaySeconds)}</span>
-                </div>
-            `;
-        } else {
-            let noTimerMessage, messageColor;
-            let nameColor = npcType === 'TITAN' ? '#ff3333' : '#ff6b9d';
-            
-            if (npcType === 'TITAN') {
-                const hasAccess = hasTitanAccess;
-                noTimerMessage = hasAccess ? `${eliteName} wybity` : 'Brak dost\u0119pu do timera';
-                messageColor = hasAccess ? '#ffaa00' : '#999';
-            } else {
-                noTimerMessage = 'nie ma na timerze';
-                messageColor = '#999';
-            }
-            
-            toast.innerHTML = `
-                <div style="display: flex; align-items: center; gap: 8px;">
-                    <span style="color: ${nameColor}; font-weight: bold;">${eliteName}</span>
-                    <span style="color: #aaa;">-</span>
-                    <span style="color: ${messageColor};">${noTimerMessage}</span>
-                </div>
-            `;
-        }
-
-        const style = document.createElement('style');
-        style.textContent = `
-            @keyframes slideIn {
-                from {
-                    opacity: 0;
-                    transform: scale(0.9);
-                }
-                to {
-                    opacity: 1;
-                    transform: scale(1);
-                }
-            }
-            @keyframes fadeOut {
-                from {
-                    opacity: 1;
-                }
-                to {
-                    opacity: 0;
-                }
-            }
-        `;
-        if (!document.getElementById('elite-toast-style')) {
-            style.id = 'elite-toast-style';
-            document.head.appendChild(style);
-        }
-
-        document.body.appendChild(toast);
-
-        if (hasLootlogTimer) {
-            const totalSeconds = lootlogTimer.remainingSeconds;
-            const minSeconds = lootlogTimer.minRemainingSeconds || 0;
-            let remainingSeconds = totalSeconds;
-            let minRemainingSeconds = minSeconds;
-            const timerElement = document.getElementById(timerElementId);
-            
-            const interval = setInterval(() => {
-                remainingSeconds--;
-                minRemainingSeconds--;
-                
-                if (remainingSeconds > 0 && timerElement) {
-                    if (isTitan) {
-                        // Przełączaj kolory i tekst dla TITAN w zależności od okresu
-                        const allSpans = toast.querySelectorAll('span');
-                        const labelSpan = allSpans[2]; // label text span
-                        
-                        if (minRemainingSeconds > 0) {
-                            // Cooldown - białe kolory, wyświetl czas do okna respu (minRemainingSeconds)
-                            timerElement.style.color = '#fff';
-                            labelSpan.style.color = '#fff';
-                            labelSpan.textContent = 'zaczyna respa za';
-                            timerElement.textContent = formatTime(minRemainingSeconds);
-                        } else {
-                            // Okno respu - pomarańczowe kolory, wyświetl czas do końca (remainingSeconds)
-                            timerElement.style.color = '#ffa500';
-                            labelSpan.style.color = '#ffa500';
-                            labelSpan.textContent = 'respi jeszcze przez';
-                            timerElement.textContent = formatTime(remainingSeconds);
-                        }
-                    } else {
-                        // ELITE2 - zwykły countdown
-                        timerElement.textContent = formatTime(remainingSeconds);
-                    }
-                } else if (remainingSeconds <= 0) {
+            let remaining = lootlogTimer.remainingSeconds;
+            let minRemaining = lootlogTimer.minRemainingSeconds || 0;
+            const minTs = toTimestamp(lootlogTimer.minSpawnTime);
+            const maxTs = toTimestamp(lootlogTimer.maxSpawnTime);
+            const windowSeconds = minTs && maxTs && maxTs > minTs ? (maxTs - minTs) / 1000 : Math.max(1, remaining);
+            paint(timerState(isTitan, remaining, minRemaining, windowSeconds));
+            interval = setInterval(() => {
+                // Odswiezenie podmienia tost; stary licznik musi umrzec razem z nim
+                if (!toast.isConnected) return clearInterval(interval);
+                remaining--;
+                minRemaining--;
+                paint(timerState(isTitan, remaining, minRemaining, windowSeconds));
+                // Blysk tylko na zywo, nie przy odswiezeniu tostu z gotowym bossem
+                if (remaining <= 0) {
                     clearInterval(interval);
-                    const nameColor = isTitan ? '#ff3333' : '#ff6b9d';
-                    toast.innerHTML = `
-                        <div style="display: flex; align-items: center; gap: 8px;">
-                            <span style="color: ${nameColor}; font-weight: bold;">${eliteName}</span>
-                            <span style="color: #aaa;">-</span>
-                            <span style="color: #00ff88; font-weight: bold;">zrespił/a</span>
-                        </div>
-                    `;
+                    toast.classList.add('et-flash');
                 }
             }, 1000);
-
-            toast.addEventListener('click', () => {
-                clearInterval(interval);
-                toast.style.animation = 'fadeOut 0.2s ease-out';
-                setTimeout(() => {
-                    toast.remove();
-                }, 200);
-            });
+        } else if (isTitan && hasTitanAccess) {
+            paint({ text: 'wybity', color: UI.window, title: 'brak timera - wybity', phase: 'none', p: 0 });
         } else {
-            toast.addEventListener('click', () => {
-                toast.style.animation = 'fadeOut 0.2s ease-out';
-                setTimeout(() => {
-                    toast.remove();
-                }, 200);
-            });
+            paint({ text: '—', color: UI.muted, title: isTitan ? 'brak dostępu do timera' : 'nie ma na timerze', phase: 'none', p: 0 });
         }
 
-        toast.style.cursor = 'pointer';
-        toast.title = 'Kliknij aby zamknąć';
+        toast.addEventListener('click', () => {
+            clearInterval(interval);
+            toast.style.animation = 'fadeOut 0.2s ease-out';
+            setTimeout(() => toast.remove(), 200);
+        });
+
+        getToastContainer().appendChild(toast);
     }
 
     function formatTime(seconds) {
-        const hours = Math.floor(seconds / 3600);
-        const minutes = Math.floor((seconds % 3600) / 60);
-        const secs = seconds % 60;
-        
-        return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+        const h = Math.floor(seconds / 3600);
+        const m = String(Math.floor((seconds % 3600) / 60)).padStart(2, '0');
+        const s = String(seconds % 60).padStart(2, '0');
+        return h > 0 ? `${h}:${m}:${s}` : `${m}:${s}`;
     }
 
     function showMatherWarning() {
@@ -909,14 +885,10 @@
         }, 3000);
     }
 
+    // Od razu, bez wygaszania: w kontenerze flex wygasajace stare pigulki
+    // przesuwalyby nowe przez 200 ms
     function removeAllToasts() {
-        const toasts = document.querySelectorAll('.elite-toast');
-        toasts.forEach(toast => {
-            toast.style.animation = 'fadeOut 0.2s ease-out';
-            setTimeout(() => {
-                toast.remove();
-            }, 200);
-        });
+        document.querySelectorAll('.elite-toast').forEach(toast => toast.remove());
     }
 
     function checkMapChange(forceRefresh = false) {
@@ -940,7 +912,7 @@
                     const npcNames = npcData.split('/').map(n => n.trim());
                     let matherDetected = false;
                     
-                    npcNames.forEach((npcName, index) => {
+                    npcNames.forEach((npcName) => {
                         let lootlogTimer = null;
                         const nameLower = npcName.toLowerCase();
                         
@@ -967,7 +939,7 @@
                             }
                         }
                         
-                        showToast(npcName, lootlogTimer, index, npcType);
+                        showToast(npcName, lootlogTimer, npcType);
                     });
                     
                     if (matherDetected) {
@@ -1097,6 +1069,7 @@
         } catch (e) {
         }
         
+        ensureStyles();
         setupNpcKillListener();
         createPositionSettings();
         
@@ -1118,50 +1091,18 @@
     function createPositionSettings() {
         const settingsButton = document.createElement('div');
         settingsButton.id = 'elite-position-settings-btn';
-        settingsButton.innerHTML = '⚙️';
-        
+        settingsButton.textContent = '⚙';
+        settingsButton.title = 'Pozycja timerów E2/Tytan';
+
         function updateButtonPosition() {
             const bounds = getGameCanvasBounds();
-            settingsButton.style.cssText = `
-                position: fixed;
-                top: ${bounds.top + bounds.height - 35}px;
-                left: ${bounds.left + bounds.width - 35}px;
-                width: 28px;
-                height: 28px;
-                background: rgba(20, 20, 20, 0.8);
-                color: #fff;
-                border-radius: 50%;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                cursor: pointer;
-                font-size: 14px;
-                z-index: 99998;
-                box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-                transition: all 0.2s;
-                backdrop-filter: blur(5px);
-            `;
+            settingsButton.style.top = `${bounds.top + bounds.height - 24}px`;
+            settingsButton.style.left = `${bounds.left + bounds.width - 24}px`;
         }
-        
+
         updateButtonPosition();
-        settingsButton.title = 'Ustawienia pozycji komunikatów E2/Tytan';
-        
-        settingsButton.addEventListener('mouseenter', () => {
-            settingsButton.style.transform = 'scale(1.1)';
-            settingsButton.style.background = 'rgba(40, 40, 40, 0.9)';
-        });
-        
-        settingsButton.addEventListener('mouseleave', () => {
-            settingsButton.style.transform = 'scale(1)';
-            settingsButton.style.background = 'rgba(20, 20, 20, 0.8)';
-        });
-        
-        settingsButton.addEventListener('click', () => {
-            showPositionPanel();
-        });
-        
+        settingsButton.addEventListener('click', showPositionPanel);
         document.body.appendChild(settingsButton);
-        
         window.addEventListener('resize', updateButtonPosition);
     }
 
@@ -1172,110 +1113,39 @@
             return;
         }
 
-        const panel = document.createElement('div');
-        panel.id = 'elite-position-panel';
-        panel.style.cssText = `
-            position: fixed;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            background: rgba(20, 20, 20, 0.95);
-            color: #fff;
-            padding: 15px;
-            border-radius: 10px;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
-            z-index: 100000;
-            min-width: 240px;
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-        `;
-
         const positions = [
-            { value: 'top-left', label: '↖ Góra Lewo', icon: '↖' },
-            { value: 'top-center', label: '⬆ Góra Środek', icon: '⬆' },
-            { value: 'top-right', label: '↗ Góra Prawo', icon: '↗' },
-            { value: 'middle-left', label: '⬅ Środek Lewo', icon: '⬅' },
-            { value: 'middle-center', label: '⏺ Środek', icon: '⏺' },
-            { value: 'middle-right', label: '➡ Środek Prawo', icon: '➡' },
-            { value: 'bottom-left', label: '↙ Dół Lewo', icon: '↙' },
-            { value: 'bottom-center', label: '⬇ Dół Środek', icon: '⬇' },
-            { value: 'bottom-right', label: '↘ Dół Prawo', icon: '↘' }
+            ['top-left', 'Góra lewo'], ['top-center', 'Góra środek'], ['top-right', 'Góra prawo'],
+            ['middle-left', 'Środek lewo'], ['middle-center', 'Środek'], ['middle-right', 'Środek prawo'],
+            ['bottom-left', 'Dół lewo'], ['bottom-center', 'Dół środek'], ['bottom-right', 'Dół prawo']
         ];
 
-        let html = `
-            <div style="text-align: center; margin-bottom: 10px;">
-                <h3 style="margin: 0 0 3px 0; color: #ff6b9d; font-size: 14px;">Pozycja komunikatów</h3>
-                <p style="margin: 0; font-size: 10px; color: #999;">Wybierz gdzie mają się wyświetlać timery</p>
-            </div>
-            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-bottom: 12px;">
-        `;
+        // Siatka 3x3 odwzorowuje ekran, wiec ikony i opisy sa zbedne
+        const panel = document.createElement('div');
+        panel.id = 'elite-position-panel';
+        const btnRect = document.getElementById('elite-position-settings-btn').getBoundingClientRect();
+        panel.style.top = `${btnRect.top - 4}px`;
+        panel.style.left = `${btnRect.right}px`;
 
-        positions.forEach(pos => {
-            const isActive = toastPosition === pos.value;
-            html += `
-                <button 
-                    class="position-btn" 
-                    data-position="${pos.value}"
-                    style="
-                        padding: 8px 6px;
-                        background: ${isActive ? 'rgba(255, 107, 157, 0.3)' : 'rgba(50, 50, 50, 0.5)'};
-                        border: 2px solid ${isActive ? '#ff6b9d' : 'rgba(255, 255, 255, 0.1)'};
-                        color: #fff;
-                        border-radius: 6px;
-                        cursor: pointer;
-                        font-size: 18px;
-                        transition: all 0.2s;
-                        display: flex;
-                        align-items: center;
-                        justify-content: center;
-                    "
-                    onmouseover="this.style.background='rgba(255, 107, 157, 0.2)'; this.style.borderColor='#ff6b9d';"
-                    onmouseout="this.style.background='${isActive ? 'rgba(255, 107, 157, 0.3)' : 'rgba(50, 50, 50, 0.5)'}'; this.style.borderColor='${isActive ? '#ff6b9d' : 'rgba(255, 255, 255, 0.1)'}';"
-                >${pos.icon}</button>
-            `;
-        });
-
-        html += `
-            </div>
-            <div style="text-align: center; font-size: 10px; color: #aaa; margin-bottom: 8px;">
-                Aktualna: <span style="color: #ff6b9d; font-weight: bold;">${positions.find(p => p.value === toastPosition).label}</span>
-            </div>
-            <button id="close-position-panel" style="
-                width: 100%;
-                padding: 8px;
-                background: rgba(100, 100, 100, 0.3);
-                border: 1px solid rgba(255, 255, 255, 0.2);
-                color: #fff;
-                border-radius: 6px;
-                cursor: pointer;
-                font-size: 11px;
-                transition: all 0.2s;
-            "
-            onmouseover="this.style.background='rgba(150, 150, 150, 0.3)';"
-            onmouseout="this.style.background='rgba(100, 100, 100, 0.3)';"
-            >Zamknij</button>
-        `;
-
-        panel.innerHTML = html;
-        document.body.appendChild(panel);
-
-        panel.querySelectorAll('.position-btn').forEach(btn => {
+        positions.forEach(([value, label]) => {
+            const btn = document.createElement('button');
+            btn.title = label;
+            btn.setAttribute('aria-label', label);
+            if (value === toastPosition) btn.className = 'active';
             btn.addEventListener('click', () => {
-                const newPosition = btn.getAttribute('data-position');
-                toastPosition = newPosition;
-                localStorage.setItem('eliteToastPosition', newPosition);
+                toastPosition = value;
+                localStorage.setItem('eliteToastPosition', value);
                 panel.remove();
                 removeAllToasts();
-                setTimeout(() => checkMapChange(true), 100);
+                checkMapChange(true);
             });
+            panel.appendChild(btn);
         });
 
-        document.getElementById('close-position-panel').addEventListener('click', () => {
-            panel.remove();
-        });
+        document.body.appendChild(panel);
 
         setTimeout(() => {
             document.addEventListener('click', function closePanel(e) {
+                if (!panel.isConnected) return document.removeEventListener('click', closePanel);
                 if (!panel.contains(e.target) && e.target.id !== 'elite-position-settings-btn') {
                     panel.remove();
                     document.removeEventListener('click', closePanel);
