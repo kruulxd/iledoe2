@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Za ile respi Elita II & Tytan
 // @namespace    http://tampermonkey.net/
-// @version      1.7.8
+// @version      1.7.6
 // @description  Pokazuje timery elit II i tytanow z pelna integracja Lootlog
 // @author       Kruul
 // @match        https://*.margonem.pl/
@@ -552,7 +552,6 @@
 
     const UI = {
         e2: '#ff7aa8',
-        titan: '#ff4d4d',
         ready: '#6dffa8',
         wait: '#e6e6e6',
         window: '#ffb347',
@@ -576,42 +575,20 @@
                 align-items: center;
                 gap: 6px;
                 max-width: 260px;
-                padding: 3px 9px 3px 7px;
+                padding: 3px 9px;
                 border-radius: 999px;
                 background: rgba(12, 12, 16, 0.62);
                 border: 1px solid rgba(255, 255, 255, 0.08);
                 color: #e6e6e6;
-                font: 11px/1.4 Arial, sans-serif;
+                font: 12px/1.4 Arial, sans-serif;
                 cursor: pointer;
                 user-select: none;
                 white-space: nowrap;
-                position: relative;
-                overflow: hidden;
-                transition: opacity 0.3s;
+                animation: eliteFadeIn 0.2s ease-out;
             }
-            .elite-toast.et-enter { animation: eliteFadeIn 0.2s ease-out; }
-            .elite-toast:hover { background: rgba(12, 12, 16, 0.85); opacity: 1; }
-            .elite-toast .et-dot { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+            .elite-toast:hover { background: rgba(12, 12, 16, 0.85); }
             .elite-toast .et-name { overflow: hidden; text-overflow: ellipsis; opacity: 0.9; }
             .elite-toast .et-time { font-weight: bold; font-variant-numeric: tabular-nums; flex: none; }
-            /* Pasek postepu przy dolnej krawedzi pigulki */
-            .elite-toast::after {
-                content: '';
-                position: absolute;
-                left: 0;
-                bottom: 0;
-                height: 2px;
-                width: calc(var(--p, 0) * 100%);
-                background: var(--c, transparent);
-                transition: width 1s linear;
-            }
-            /* Daleko do respa albo brak timera: sama kropka i czas, nazwa po najechaniu */
-            .elite-toast[data-phase="far"], .elite-toast[data-phase="none"] { opacity: 0.65; }
-            .elite-toast[data-phase="far"]:not(:hover) .et-name,
-            .elite-toast[data-phase="none"]:not(:hover) .et-name { display: none; }
-            .elite-toast[data-phase="soon"] { animation: etPulse 1s ease-in-out infinite alternate; }
-            .elite-toast[data-phase="ready"] { border-color: ${UI.ready}; }
-            .elite-toast.et-flash { animation: etFlash 0.5s ease-in-out 3; }
             #elite-position-settings-btn {
                 position: fixed;
                 z-index: 99998;
@@ -652,40 +629,17 @@
             #elite-position-panel button:hover { background: rgba(255, 122, 168, 0.25); }
             #elite-position-panel button.active { background: ${UI.e2}; border-color: ${UI.e2}; }
             @keyframes eliteFadeIn { from { opacity: 0; } to { opacity: 1; } }
-            @keyframes etPulse { to { box-shadow: 0 0 8px 1px var(--c); } }
-            @keyframes etFlash { 50% { background: rgba(109, 255, 168, 0.35); } }
             @keyframes fadeOut { from { opacity: 1; } to { opacity: 0; } }
         `;
         document.head.appendChild(style);
     }
 
-    // Pasek liczy tylko ostatnie 10 min: Lootlog nie podaje czasu zabicia,
-    // wiec pelnej dlugosci odliczania nie znamy. ponytail: stala zamiast ustawienia
-    const PROGRESS_HORIZON = 600;
-    const FAR_SECONDS = 120;
-    const SOON_SECONDS = 60;
-
-    // Stan licznika -> tekst, kolor, faza i postep paska. Etykiety sa w title,
-    // zeby pigulka miescila tylko nazwe i czas.
-    function timerState(isTitan, remaining, minRemaining, windowSeconds) {
-        if (remaining <= 0) return { text: 'jest', color: UI.ready, title: 'zrespił/a', phase: 'ready', p: 1 };
-        if (isTitan && minRemaining <= 0) {
-            return {
-                text: '≤ ' + formatTime(remaining),
-                color: UI.window,
-                title: 'może respić - okno zamyka się za',
-                phase: 'window',
-                p: Math.min(1, Math.max(0, 1 - remaining / windowSeconds))
-            };
-        }
-        const left = isTitan ? minRemaining : remaining;
-        return {
-            text: formatTime(left),
-            color: UI.wait,
-            title: isTitan ? 'okno respa otworzy się za' : 'respi za',
-            phase: left > FAR_SECONDS ? 'far' : left > SOON_SECONDS ? 'near' : 'soon',
-            p: Math.min(1, Math.max(0, 1 - left / PROGRESS_HORIZON))
-        };
+    // Stan licznika -> tekst i kolor czasu w pigulce
+    function timerState(isTitan, remaining, minRemaining) {
+        if (remaining <= 0) return { text: 'jest', color: UI.ready };
+        if (isTitan && minRemaining > 0) return { text: formatTime(minRemaining), color: UI.wait };
+        if (isTitan) return { text: '≤ ' + formatTime(remaining), color: UI.window };
+        return { text: formatTime(remaining), color: UI.wait };
     }
 
     function showToast(eliteName, lootlogTimer = null, npcType = 'ELITE2') {
@@ -699,52 +653,41 @@
         const toast = document.createElement('div');
         toast.id = toastId;
         toast.className = 'elite-toast';
-        // Wejscie animowane tylko przy pierwszym pokazaniu, nie przy odswiezeniu co 20 s
-        if (!existingToast) toast.classList.add('et-enter');
+        // Bez animacji przy odswiezeniu co 20 s, tylko przy pierwszym pokazaniu
+        if (existingToast) toast.style.animation = 'none';
 
-        const dot = document.createElement('span');
-        dot.className = 'et-dot';
-        dot.style.background = isTitan ? UI.titan : UI.e2;
         const name = document.createElement('span');
         name.className = 'et-name';
         name.textContent = eliteName;
         const time = document.createElement('span');
         time.className = 'et-time';
-        toast.append(dot, name, time);
+        toast.append(name, time);
+
+        const addedBy = hasLootlogTimer && lootlogTimer.addedByName;
+        toast.title = addedBy ? `Dodane przez: ${addedBy}\nKliknij, aby ukryć` : 'Kliknij, aby ukryć';
 
         const paint = (state) => {
             time.textContent = state.text;
             time.style.color = state.color;
-            toast.title = `${eliteName} - ${state.title} (kliknij, aby ukryć)`;
-            toast.dataset.phase = state.phase;
-            toast.style.setProperty('--p', state.p);
-            toast.style.setProperty('--c', state.color === UI.wait ? (isTitan ? UI.titan : UI.e2) : state.color);
         };
 
         let interval = null;
         if (hasLootlogTimer) {
             let remaining = lootlogTimer.remainingSeconds;
             let minRemaining = lootlogTimer.minRemainingSeconds || 0;
-            const minTs = toTimestamp(lootlogTimer.minSpawnTime);
-            const maxTs = toTimestamp(lootlogTimer.maxSpawnTime);
-            const windowSeconds = minTs && maxTs && maxTs > minTs ? (maxTs - minTs) / 1000 : Math.max(1, remaining);
-            paint(timerState(isTitan, remaining, minRemaining, windowSeconds));
+            paint(timerState(isTitan, remaining, minRemaining));
             interval = setInterval(() => {
                 // Odswiezenie podmienia tost; stary licznik musi umrzec razem z nim
                 if (!toast.isConnected) return clearInterval(interval);
                 remaining--;
                 minRemaining--;
-                paint(timerState(isTitan, remaining, minRemaining, windowSeconds));
-                // Blysk tylko na zywo, nie przy odswiezeniu tostu z gotowym bossem
-                if (remaining <= 0) {
-                    clearInterval(interval);
-                    toast.classList.add('et-flash');
-                }
+                paint(timerState(isTitan, remaining, minRemaining));
+                if (remaining <= 0) clearInterval(interval);
             }, 1000);
         } else if (isTitan && hasTitanAccess) {
-            paint({ text: 'wybity', color: UI.window, title: 'brak timera - wybity', phase: 'none', p: 0 });
+            paint({ text: 'wybity', color: UI.window });
         } else {
-            paint({ text: '—', color: UI.muted, title: isTitan ? 'brak dostępu do timera' : 'nie ma na timerze', phase: 'none', p: 0 });
+            paint({ text: '—', color: UI.muted });
         }
 
         toast.addEventListener('click', () => {
